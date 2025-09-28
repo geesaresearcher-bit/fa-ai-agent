@@ -55,6 +55,11 @@ router.get('/google/callback', async (req, res) => {
 
         // start session
         req.session.userId = user._id;
+        console.log('[/google/callback] Session set:', {
+            sessionId: req.sessionID,
+            userId: user._id,
+            email: user.email
+        });
 
         // If HubSpot not connected, go connect it next
         if (!user.hubspot_tokens?.access_token) {
@@ -147,11 +152,26 @@ router.post('/logout', (req, res) => {
 });
 
 router.get('/me', async (req, res) => {
+    console.log('[/me] Session check:', {
+        sessionId: req.sessionID,
+        userId: req.session?.userId,
+        session: req.session
+    });
+    
     // "soft" me endpoint (doesn't force both tokens, just reports)
-    if (!req.session?.userId) return res.status(401).json({ error: 'Not logged in' });
+    if (!req.session?.userId) {
+        console.log('[/me] No session userId found');
+        return res.status(401).json({ error: 'Not logged in' });
+    }
+    
     const db = getDb();
     const user = await db.collection('users').findOne({ _id: req.session.userId });
-    if (!user) return res.status(404).json({ error: 'User not found' });
+    if (!user) {
+        console.log('[/me] User not found in database');
+        return res.status(404).json({ error: 'User not found' });
+    }
+    
+    console.log('[/me] User found:', { email: user.email, hasGoogle: !!user.google_tokens, hasHubSpot: !!user.hubspot_tokens?.access_token });
     res.json({
         email: user.email,
         hasGoogle: !!user.google_tokens,

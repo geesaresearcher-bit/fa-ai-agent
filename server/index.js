@@ -39,7 +39,7 @@ app.use(session({
   cookie: {
     httpOnly: true,
     sameSite: 'lax',
-    // secure: true, // enable in production with HTTPS
+    secure: process.env.NODE_ENV === 'production', // enable in production with HTTPS
     maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days (session lifetime)
   },
   store: MongoStore.create({
@@ -49,6 +49,18 @@ app.use(session({
     stringify: false
   })
 }));
+
+// Session debugging middleware
+app.use((req, res, next) => {
+  if (req.path.includes('/auth/me')) {
+    console.log('Session middleware:', {
+      sessionId: req.sessionID,
+      userId: req.session?.userId,
+      cookies: req.headers.cookie
+    });
+  }
+  next();
+});
 
 app.use('/auth', authRoutes);
 app.use('/chat', chatRoutes);
