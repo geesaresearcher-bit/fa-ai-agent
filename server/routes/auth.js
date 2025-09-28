@@ -81,7 +81,7 @@ router.get('/google/callback', async (req, res) => {
             userId: user._id,
             email: user.email
         });
-        
+        console.log(process.env.NODE_ENV);
         // Set cookie manually to ensure proper configuration
         res.cookie('sid', req.sessionID, {
             httpOnly: true,
@@ -103,6 +103,16 @@ router.get('/google/callback', async (req, res) => {
         // If HubSpot not connected, go connect it next
         if (!user.hubspot_tokens?.access_token) {
             console.log('HubSpot not connected, redirecting to connect it', `${process.env.BACKEND_URL}/auth/hubspot`);
+            
+            // Ensure session is saved before redirect
+            req.session.save((err) => {
+                if (err) {
+                    console.error('Session save error before HubSpot redirect:', err);
+                } else {
+                    console.log('Session saved before HubSpot redirect');
+                }
+            });
+            
             return res.redirect(`${process.env.BACKEND_URL}/auth/hubspot`);
         }
 
@@ -116,6 +126,27 @@ router.get('/google/callback', async (req, res) => {
 
 /* ===== HubSpot OAuth ===== */
 router.get('/hubspot', (req, res) => {
+    console.log('HubSpot OAuth check:', {
+        sessionId: req.sessionID,
+        userId: req.session?.userId,
+        cookies: req.headers.cookie
+    });
+    
+    if (!req.session?.userId) {
+        console.log('No session found, redirecting to Google OAuth');
+        // must be logged in via Google first to have a session
+        return res.redirect(`${process.env.BACKEND_URL}/auth/google`);
+    }
+    
+    // Ensure session cookie is set for this request
+    res.cookie('sid', req.sessionID, {
+        httpOnly: true,
+        sameSite: 'none',
+        secure: process.env.NODE_ENV === 'production',
+        maxAge: 7 * 24 * 60 * 60 * 1000,
+        path: '/'
+    });
+    
     const scope = [
         'crm.objects.contacts.read',
         'crm.objects.contacts.write',
