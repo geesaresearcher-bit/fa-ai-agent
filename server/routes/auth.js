@@ -186,6 +186,23 @@ router.get('/me', async (req, res) => {
         req.session.reload((err) => {
             if (err) {
                 console.log('[/me] Session reload error:', err);
+                // If session reload fails, try to find user by session ID in database
+                console.log('[/me] Attempting to find session in database...');
+                const db = getDb();
+                if (db) {
+                    db.collection('sessions').findOne({ _id: req.sessionID })
+                        .then(sessionDoc => {
+                            if (sessionDoc && sessionDoc.session && sessionDoc.session.userId) {
+                                console.log('[/me] Found session in database:', sessionDoc.session.userId);
+                                req.session.userId = sessionDoc.session.userId;
+                            } else {
+                                console.log('[/me] No session found in database');
+                            }
+                        })
+                        .catch(dbErr => {
+                            console.error('[/me] Database lookup error:', dbErr);
+                        });
+                }
             } else {
                 console.log('[/me] Session reloaded:', {
                     sessionId: req.sessionID,

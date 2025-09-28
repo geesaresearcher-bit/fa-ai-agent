@@ -52,7 +52,10 @@ app.use(session({
     dbName: process.env.DB_NAME || 'fa_agent',
     collectionName: 'sessions',
     stringify: false,
-    touchAfter: 24 * 3600 // lazy session update
+    touchAfter: 24 * 3600, // lazy session update
+    autoRemove: 'native', // use native MongoDB TTL
+    autoRemoveInterval: 10, // check every 10 minutes
+    ttl: 7 * 24 * 60 * 60 // 7 days in seconds
   })
 }));
 
@@ -164,6 +167,43 @@ app.get('/set-test-session', (req, res) => {
       });
     }
   });
+});
+
+// Test MongoDB connection
+app.get('/test-db', async (req, res) => {
+  try {
+    const db = getDb();
+    if (!db) {
+      return res.json({ error: 'Database not connected' });
+    }
+    
+    // Test basic connection
+    const result = await db.admin().ping();
+    console.log('MongoDB ping result:', result);
+    
+    // Test sessions collection
+    const sessions = await db.collection('sessions').find({}).limit(1).toArray();
+    console.log('Sessions collection test:', sessions.length);
+    
+    // Test user collection
+    const users = await db.collection('users').find({}).limit(1).toArray();
+    console.log('Users collection test:', users.length);
+    
+    res.json({ 
+      connected: true, 
+      ping: result,
+      sessionsCount: sessions.length,
+      usersCount: users.length,
+      message: 'Database connection successful'
+    });
+  } catch (error) {
+    console.error('Database test error:', error);
+    res.json({ 
+      connected: false, 
+      error: error.message,
+      stack: error.stack
+    });
+  }
 });
 
 const PORT = process.env.PORT || 4000;
