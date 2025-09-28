@@ -22,7 +22,14 @@ app.use(cors({
 app.use(cookieParser());
 app.use(bodyParser.json({ limit: '2mb' }));
 
-await connectDb();
+// Connect to database with error handling
+try {
+  await connectDb();
+  console.log('Database connected successfully');
+} catch (error) {
+  console.error('Database connection failed:', error);
+  console.log('Server will start without database connection');
+}
 
 app.use(session({
   name: 'sid',
@@ -50,6 +57,16 @@ app.use('/webhook', webhookRoutes);
 app.use('/conversations', conversationsRoutes);
 
 app.get('/', (req, res) => res.send('Financial Advisor AI Agent Backend'));
+
+// Health check endpoint
+app.get('/health', (req, res) => {
+  res.json({
+    status: 'OK',
+    timestamp: new Date().toISOString(),
+    environment: process.env.NODE_ENV,
+    port: process.env.PORT
+  });
+});
 
 const PORT = process.env.PORT || 4000;
 app.listen(PORT, () => console.log('Server listening on', PORT));

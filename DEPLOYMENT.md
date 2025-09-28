@@ -49,9 +49,10 @@ git push origin main
 If you prefer to set up services manually:
 
 1. **Create Database**:
-   - Go to "New +" → "PostgreSQL" or "MongoDB"
+   - Go to "New +" → "MongoDB" (if available) or use external MongoDB service
    - Name it `fa-ai-agent-db`
    - Note the connection string
+   - **Alternative**: Use MongoDB Atlas (free tier) or keep your existing MongoDB setup
 
 2. **Deploy Backend**:
    - Go to "New +" → "Web Service"
