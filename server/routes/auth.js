@@ -61,6 +61,15 @@ router.get('/google/callback', async (req, res) => {
             email: user.email
         });
         
+        // Set cookie manually to ensure proper configuration
+        res.cookie('sid', req.sessionID, {
+            httpOnly: true,
+            sameSite: 'none',
+            secure: process.env.NODE_ENV === 'production',
+            maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+            path: '/'
+        });
+        
         // Ensure session is saved
         req.session.save((err) => {
             if (err) {
