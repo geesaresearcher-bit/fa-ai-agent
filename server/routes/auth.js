@@ -132,12 +132,23 @@ router.get('/hubspot', (req, res) => {
 
     const url = `https://app.hubspot.com/oauth/authorize?client_id=${process.env.HUBSPOT_CLIENT_ID}` +
         `&redirect_uri=${encodeURIComponent(process.env.HUBSPOT_OAUTH_CALLBACK)}` +
-        `&scope=${encodeURIComponent(scope)}`;
+        `&scope=${encodeURIComponent(scope)}` +
+        `&response_type=code`;
+    
+    console.log('HubSpot OAuth URL:', url);
     res.redirect(url);
 });
 
 router.get('/hubspot/callback', async (req, res) => {
     try {
+        console.log('HubSpot OAuth callback received:', {
+            sessionId: req.sessionID,
+            userId: req.session?.userId,
+            code: req.query.code ? 'present' : 'missing',
+            error: req.query.error,
+            query: req.query
+        });
+        
         if (!req.session?.userId) return res.status(401).send('Session missing. Login with Google first.');
         const code = req.query.code;
         if (!code) return res.status(400).send('Missing code');
