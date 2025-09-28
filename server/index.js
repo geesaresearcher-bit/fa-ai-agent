@@ -5,7 +5,7 @@ import cors from 'cors';
 import cookieParser from 'cookie-parser';
 import session from 'express-session';
 import MongoStore from 'connect-mongo';
-import { connectDb } from './lib/db.js';
+import { connectDb, getDb } from './lib/db.js';
 import authRoutes from './routes/auth.js';
 import chatRoutes from './routes/chat.js';
 import taskRoutes from './routes/tasks.js';
