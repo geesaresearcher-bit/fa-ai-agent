@@ -1,4 +1,5 @@
 import React from 'react';
+import { Routes, Route, Navigate } from 'react-router-dom';
 import { whoAmI } from './api';
 import Login from './components/Login';
 import Chat from './components/Chat';
@@ -25,9 +26,22 @@ export default function App() {
     );
   }
 
-  // If not logged in or one of provider tokens expired, backend /auth/me returns 401
-  // and we render Login. After Google OAuth it will auto-jump to HubSpot if needed.
-  return state.user ? <Chat me={state.user} onAuthChanged={load} /> : <Login />;
+  return (
+    <Routes>
+      <Route 
+        path="/login" 
+        element={state.user ? <Navigate to="/chat" replace /> : <Login />} 
+      />
+      <Route 
+        path="/chat" 
+        element={state.user ? <Chat me={state.user} onAuthChanged={load} /> : <Navigate to="/login" replace />} 
+      />
+      <Route 
+        path="/" 
+        element={<Navigate to={state.user ? "/chat" : "/login"} replace />} 
+      />
+    </Routes>
+  );
 }
 
 const styles = {

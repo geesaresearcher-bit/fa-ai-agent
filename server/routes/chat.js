@@ -17,14 +17,25 @@ import {
     addInstructionTool,
     listInstructionsTool,
     removeInstructionTool,
-    queryKnowledgeBaseTool
+    queryKnowledgeBaseTool,
+    ensureHubspotContactTool,
+    getFreeBusyTool,
+    suggestSlotsTool,
+    parseEmailResponseTool,
+    manageEmailThreadTool,
+    smartScheduleWorkflowTool,
+    proactiveAgentTool,
+    checkEmailFromUnknownTool,
+    checkCalendarEventCreatedTool,
+    checkHubspotContactCreatedTool
 } from '../lib/tools.js';
 import { ensureConversation, saveMessage, loadRecentMessages, maybeSetTitle, updateRollingSummaryIfNeeded } from '../lib/memory.js';
 import { sessionAuth } from '../middleware/sessionAuth.js';
+
 const router = express.Router();
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-// Parse “today 2.30pm”, “tomorrow at 10”, etc. -> ISO start/end
+// Parse "today 2.30pm", "tomorrow at 10", etc. -> ISO start/end
 function parseWhenToRange(text, tz = 'Asia/Colombo', defaultDurMins = 45) {
     const parsed = chrono.parse(text, new Date(), { forwardDate: true })[0];
     if (!parsed) return null;
@@ -64,7 +75,9 @@ const tools = [
                     title: { type: 'string', description: 'Event title/summary' },
                     attendees: { type: 'array', items: { type: 'string' }, description: 'Attendee emails' },
                     start: { type: 'string', description: 'Start ISO datetime' },
-                    end: { type: 'string', description: 'End ISO datetime' }
+                    end: { type: 'string', description: 'End ISO datetime' },
+                    description: { type: 'string' },
+                    timeZone: { type: 'string' }
                 },
                 required: ['title', 'attendees', 'start', 'end']
             }
@@ -81,6 +94,22 @@ const tools = [
                     timeframe: { type: 'string', description: 'Range like "today", "next 7 days", "this month"' }
                 },
                 required: ['timeframe']
+            }
+        }
+    },
+    {
+        type: 'function',
+        function: {
+            name: 'suggest_times',
+            description: 'Suggest alternative meeting slots if a requested time is busy',
+            parameters: {
+                type: 'object',
+                properties: {
+                    desiredStartISO: { type: 'string' },
+                    durationMins: { type: 'number' },
+                    timeZone: { type: 'string' }
+                },
+                required: ['desiredStartISO']
             }
         }
     },
@@ -122,6 +151,134 @@ const tools = [
                 type: 'object',
                 properties: { query: { type: 'string' } },
                 required: ['query']
+            }
+        }
+    },
+    {
+        type: 'function',
+        function: {
+            name: 'ensure_hubspot_contact',
+            description: 'Ensure a HubSpot contact exists, create if not found',
+            parameters: {
+                type: 'object',
+                properties: { email: { type: 'string' } },
+                required: ['email']
+            }
+        }
+    },
+    {
+        type: 'function',
+        function: {
+            name: 'parse_email_response',
+            description: 'Parse email response to extract available times, preferences, and scheduling information',
+            parameters: {
+                type: 'object',
+                properties: { 
+                    emailContent: { type: 'string', description: 'The email content to parse' },
+                    originalTimes: { type: 'array', items: { type: 'string' }, description: 'Original times that were offered' }
+                },
+                required: ['emailContent']
+            }
+        }
+    },
+    {
+        type: 'function',
+        function: {
+            name: 'manage_email_thread',
+            description: 'Send follow-up email in a conversation thread',
+            parameters: {
+                type: 'object',
+                properties: {
+                    to: { type: 'string' },
+                    subject: { type: 'string' },
+                    body: { type: 'string' },
+                    threadId: { type: 'string', description: 'Gmail thread ID for threading' }
+                },
+                required: ['to', 'subject', 'body']
+            }
+        }
+    },
+    {
+        type: 'function',
+        function: {
+            name: 'smart_schedule_workflow',
+            description: 'Intelligent scheduling workflow that handles the complete appointment booking process',
+            parameters: {
+                type: 'object',
+                properties: {
+                    contactName: { type: 'string', description: 'Name of the person to schedule with' },
+                    contactEmail: { type: 'string', description: 'Email of the person to schedule with' },
+                    meetingDuration: { type: 'number', description: 'Meeting duration in minutes' },
+                    preferredTimes: { type: 'array', items: { type: 'string' }, description: 'Initial time suggestions' }
+                },
+                required: ['contactName', 'contactEmail']
+            }
+        }
+    },
+    {
+        type: 'function',
+        function: {
+            name: 'proactive_agent',
+            description: 'Proactive agent that analyzes events and triggers appropriate actions based on ongoing instructions',
+            parameters: {
+                type: 'object',
+                properties: {
+                    eventType: { type: 'string', description: 'Type of event (email_from_unknown, calendar_event_created, hubspot_contact_created)' },
+                    eventData: { type: 'object', description: 'Event data and context' },
+                    context: { type: 'string', description: 'Additional context about the event' }
+                },
+                required: ['eventType', 'eventData']
+            }
+        }
+    },
+    {
+        type: 'function',
+        function: {
+            name: 'check_email_from_unknown',
+            description: 'Check if an email is from an unknown sender and trigger proactive actions',
+            parameters: {
+                type: 'object',
+                properties: {
+                    emailContent: { type: 'string' },
+                    senderEmail: { type: 'string' },
+                    subject: { type: 'string' }
+                },
+                required: ['senderEmail', 'emailContent']
+            }
+        }
+    },
+    {
+        type: 'function',
+        function: {
+            name: 'check_calendar_event_created',
+            description: 'Check when a calendar event is created and trigger proactive actions',
+            parameters: {
+                type: 'object',
+                properties: {
+                    eventId: { type: 'string' },
+                    title: { type: 'string' },
+                    attendees: { type: 'array', items: { type: 'string' } },
+                    startTime: { type: 'string' },
+                    endTime: { type: 'string' }
+                },
+                required: ['eventId', 'title']
+            }
+        }
+    },
+    {
+        type: 'function',
+        function: {
+            name: 'check_hubspot_contact_created',
+            description: 'Check when a HubSpot contact is created and trigger proactive actions',
+            parameters: {
+                type: 'object',
+                properties: {
+                    contactId: { type: 'string' },
+                    email: { type: 'string' },
+                    firstName: { type: 'string' },
+                    lastName: { type: 'string' }
+                },
+                required: ['contactId', 'email']
             }
         }
     },
@@ -293,14 +450,52 @@ If the user mentions a time like "today 2.30pm", assume timezone Asia/Colombo.`;
                 }
                 title = title || 'Meeting';
                 description = description || message; // include original user text for context
+                const tz = timeZone || 'Asia/Colombo';
 
-                const result = await scheduleEventTool(req.userId, {
-                    start, end, attendees, title, description, timeZone
+                // 1) Check for conflicts before scheduling
+                const fb = await getFreeBusyTool(userId, { startISO: start, endISO: end, timeZone: tz });
+                if (!fb.ok) {
+                    // Non-fatal: proceed to try scheduling, but surface error later
+                    toolResults.push({
+                        tool_call_id: call.id,
+                        name: 'freebusy_error',
+                        content: JSON.stringify(fb)
+                    });
+                } else if (fb.busy?.length) {
+                    // 2) Suggest alternatives & return early (do not create event)
+                    const alt = await suggestSlotsTool(userId, { desiredStartISO: start, timeZone: tz });
+                    const suggestions = (alt.ok && alt.suggestions) ? alt.suggestions.slice(0, 3) : [];
+
+                    const humanList = suggestions.map(s =>
+                        `• ${new Date(s.startISO).toLocaleString()} – ${new Date(s.endISO).toLocaleTimeString()}`
+                    ).join('\n');
+
+                    // Save assistant reply (so it appears in the thread) and return
+                    const replyText =
+                        `I’m booked at that time. Here are some other options:
+${humanList || 'No free 45-minute windows found soon. Please propose another time.'}
+Reply with one of these options and I’ll schedule it.`;
+
+                    await saveMessage(conversation._id, 'assistant', replyText, { conflict: true, suggestions });
+                    await maybeSetTitle(conversation);
+                    await updateRollingSummaryIfNeeded(conversation._id);
+
+                    return res.json({
+                        reply: replyText,
+                        threadId: String(conversation._id),
+                        toolResult: { conflict: true, suggestions }
+                    });
+                }
+
+
+                // 4) Create the event
+                const result = await scheduleEventTool(userId, {
+                    start, end, attendees, title, description, timeZone: tz
                 });
 
                 if (!result.ok) {
                     return res.json({
-                        reply: `❌ I couldn't create the event. Error: ${typeof result.error === 'string' ? result.error : JSON.stringify(result.error)}`,
+                        reply: `I couldn't create the event. Error: ${typeof result.error === 'string' ? result.error : JSON.stringify(result.error)}`,
                         toolResult: result
                     });
                 }
@@ -311,6 +506,16 @@ If the user mentions a time like "today 2.30pm", assume timezone Asia/Colombo.`;
                     content: JSON.stringify(result)
                 });
             }
+
+            else if (name === 'suggest_times') {
+                const result = await suggestSlotsTool(userId, args);
+                toolResults.push({
+                    tool_call_id: call.id,
+                    name: name,
+                    content: JSON.stringify(result)
+                });
+            }
+
             else if (name === 'send_email') {
                 const result = await sendEmailTool(userId, args);
                 toolResults.push({
@@ -319,6 +524,7 @@ If the user mentions a time like "today 2.30pm", assume timezone Asia/Colombo.`;
                     content: JSON.stringify(result)
                 });
             }
+
             else if (name === 'get_upcoming_events') {
                 const result = await getUpcomingEventsTool(userId, args);
                 toolResults.push({
@@ -327,6 +533,7 @@ If the user mentions a time like "today 2.30pm", assume timezone Asia/Colombo.`;
                     content: JSON.stringify(result)
                 });
             }
+
             else if (name === 'create_hubspot_contact') {
                 const result = await createHubspotContactTool(userId, args);
                 toolResults.push({
@@ -334,7 +541,25 @@ If the user mentions a time like "today 2.30pm", assume timezone Asia/Colombo.`;
                     name: name,
                     content: JSON.stringify(result)
                 });
+
+                if (result?.ok && result?.created && result?.email) {
+                    const thankYouEmail = await sendEmailTool(userId, {
+                        to: result.email,
+                        subject: 'Thank you for being our client',
+                        body: `Hi ${result.firstname || ''},
+                                Thank you for being a valued client. We’re excited to work with you!
+                                Best regards,
+                                Your Financial Advisor`
+                    });
+
+                    toolResults.push({
+                        tool_call_id: call.id + '_followup',
+                        name: 'send_email',
+                        content: JSON.stringify(thankYouEmail)
+                    });
+                }
             }
+
             else if (name === 'update_hubspot_contact') {
                 const result = await updateHubspotContactTool(userId, args);
                 toolResults.push({
@@ -343,6 +568,7 @@ If the user mentions a time like "today 2.30pm", assume timezone Asia/Colombo.`;
                     content: JSON.stringify(result)
                 });
             }
+
             else if (name === 'find_hubspot_contact') {
                 const result = await findHubspotContactTool(userId, args);
                 toolResults.push({
@@ -350,6 +576,32 @@ If the user mentions a time like "today 2.30pm", assume timezone Asia/Colombo.`;
                     name: name,
                     content: JSON.stringify(result)
                 });
+            }
+            else if (name === 'ensure_hubspot_contact') {
+                const result = await ensureHubspotContactTool(userId, args);
+                toolResults.push({
+                    tool_call_id: call.id,
+                    name: name,
+                    content: JSON.stringify(result)
+                });
+
+                if (result?.ok && result?.created && result?.email) {
+                    const thankYouEmail = await sendEmailTool(userId, {
+                        to: result.email,
+                        subject: 'Thank you for being our client',
+                        body: `Hi ${result.firstname || ''},
+                                Thank you for being a valued client. We’re excited to work with you!
+                                Best regards,
+                                Your Financial Advisor`
+                    });
+
+                    toolResults.push({
+                        tool_call_id: call.id + '_followup',
+                        name: 'send_email',
+                        content: JSON.stringify(thankYouEmail)
+                    });
+                }
+
             }
             else if (name === 'create_task') {
                 const result = await createTaskTool(userId, args);
@@ -359,6 +611,7 @@ If the user mentions a time like "today 2.30pm", assume timezone Asia/Colombo.`;
                     content: JSON.stringify(result)
                 });
             }
+
             else if (name === 'check_tasks') {
                 const result = await checkTasksTool(userId, args);
                 toolResults.push({
@@ -367,6 +620,7 @@ If the user mentions a time like "today 2.30pm", assume timezone Asia/Colombo.`;
                     content: JSON.stringify(result)
                 });
             }
+
             else if (name === 'complete_task') {
                 const result = await completeTaskTool(userId, args);
                 toolResults.push({
@@ -375,6 +629,7 @@ If the user mentions a time like "today 2.30pm", assume timezone Asia/Colombo.`;
                     content: JSON.stringify(result)
                 });
             }
+
             else if (name === 'query_knowledge_base') {
                 const result = await queryKnowledgeBaseTool(userId, args);
                 toolResults.push({
@@ -383,6 +638,7 @@ If the user mentions a time like "today 2.30pm", assume timezone Asia/Colombo.`;
                     content: JSON.stringify(result)
                 });
             }
+
             else if (name === 'add_instruction') {
                 const result = await addInstructionTool(userId, args);
                 toolResults.push({
@@ -391,6 +647,7 @@ If the user mentions a time like "today 2.30pm", assume timezone Asia/Colombo.`;
                     content: JSON.stringify(result)
                 });
             }
+
             else if (name === 'list_instructions') {
                 const result = await listInstructionsTool(userId);
                 toolResults.push({
@@ -399,8 +656,65 @@ If the user mentions a time like "today 2.30pm", assume timezone Asia/Colombo.`;
                     content: JSON.stringify(result)
                 });
             }
+
             else if (name === 'remove_instruction') {
                 const result = await removeInstructionTool(userId, args);
+                toolResults.push({
+                    tool_call_id: call.id,
+                    name: name,
+                    content: JSON.stringify(result)
+                });
+            }
+            else if (name === 'parse_email_response') {
+                const result = await parseEmailResponseTool(userId, args);
+                toolResults.push({
+                    tool_call_id: call.id,
+                    name: name,
+                    content: JSON.stringify(result)
+                });
+            }
+            else if (name === 'manage_email_thread') {
+                const result = await manageEmailThreadTool(userId, args);
+                toolResults.push({
+                    tool_call_id: call.id,
+                    name: name,
+                    content: JSON.stringify(result)
+                });
+            }
+            else if (name === 'smart_schedule_workflow') {
+                const result = await smartScheduleWorkflowTool(userId, args);
+                toolResults.push({
+                    tool_call_id: call.id,
+                    name: name,
+                    content: JSON.stringify(result)
+                });
+            }
+            else if (name === 'proactive_agent') {
+                const result = await proactiveAgentTool(userId, args);
+                toolResults.push({
+                    tool_call_id: call.id,
+                    name: name,
+                    content: JSON.stringify(result)
+                });
+            }
+            else if (name === 'check_email_from_unknown') {
+                const result = await checkEmailFromUnknownTool(userId, args);
+                toolResults.push({
+                    tool_call_id: call.id,
+                    name: name,
+                    content: JSON.stringify(result)
+                });
+            }
+            else if (name === 'check_calendar_event_created') {
+                const result = await checkCalendarEventCreatedTool(userId, args);
+                toolResults.push({
+                    tool_call_id: call.id,
+                    name: name,
+                    content: JSON.stringify(result)
+                });
+            }
+            else if (name === 'check_hubspot_contact_created') {
+                const result = await checkHubspotContactCreatedTool(userId, args);
                 toolResults.push({
                     tool_call_id: call.id,
                     name: name,
@@ -411,22 +725,27 @@ If the user mentions a time like "today 2.30pm", assume timezone Asia/Colombo.`;
 
         // 5) Second pass to craft a nice confirmation if tools ran
         if (toolResults.length > 0) {
+            // Filter out any existing tool calls from recent messages to avoid conflicts
+            const cleanRecent = recent.map(m => ({
+                role: m.role,
+                content: m.content
+            }));
+
             const secondMessages = [
                 { role: 'system', content: system },
                 rolled ? { role: 'system', content: `MEMORY:\n${rolled}` } : null,
-                ...recent.map(m => ({ role: m.role, content: m.content })),
-                { role: 'assistant', content: `CONTEXT:\n${context}` },
+                ...cleanRecent,
                 { role: 'user', content: message }
             ].filter(Boolean);
 
-            // Add the tool calls and all responses
+            // Add the tool calls and all responses in the correct order
             secondMessages.push({
                 role: 'assistant',
                 content: null,
                 tool_calls: toolCalls
             });
-            
-            // Add all tool responses
+
+            // Add all tool responses immediately after the assistant message with tool_calls
             for (const toolResult of toolResults) {
                 secondMessages.push({
                     role: 'tool',
@@ -436,6 +755,8 @@ If the user mentions a time like "today 2.30pm", assume timezone Asia/Colombo.`;
                 });
             }
 
+            console.log('Second messages structure:', secondMessages);
+
             const second = await openai.chat.completions.create({
                 model: 'gpt-4o-mini',
                 messages: secondMessages
@@ -444,7 +765,12 @@ If the user mentions a time like "today 2.30pm", assume timezone Asia/Colombo.`;
         }
 
         // Save assistant reply
-        await saveMessage(conversation._id, 'assistant', assistantText, toolResults.length > 0 ? { tool_results: toolResults } : {});
+        await saveMessage(
+            conversation._id,
+            'assistant',
+            assistantText,
+            toolResults.length > 0 ? { tool_results: toolResults } : {}
+        );
 
         // Maybe set a nice title & roll the summary if long
         await maybeSetTitle(conversation);
@@ -456,6 +782,7 @@ If the user mentions a time like "today 2.30pm", assume timezone Asia/Colombo.`;
             toolResult: toolResults.length > 0 ? toolResults : null
         });
     } catch (e) {
+        console.log(e);
         console.error('/chat/message error', e?.message || e);
         res.status(500).json({ error: 'chat_failed' });
     }

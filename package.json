@@ -1,0 +1,21 @@
+{
+  "name": "fa-ai-agent",
+  "version": "1.0.0",
+  "description": "Financial Advisor AI Agent",
+  "type": "module",
+  "scripts": {
+    "install:all": "npm install && cd server && npm install && cd ../client && npm install",
+    "build": "cd client && npm run build",
+    "start:server": "cd server && npm start",
+    "start:client": "cd client && npm start",
+    "dev": "concurrently \"npm run start:server\" \"npm run start:client\"",
+    "deploy:render": "echo 'Deploying to Render...' && echo 'Make sure to push your code to GitHub first!'"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  },
+  "engines": {
+    "node": ">=18.0.0",
+    "npm": ">=8.0.0"
+  }
+}

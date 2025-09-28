@@ -1,0 +1,64 @@
+services:
+  # Backend API Service
+  - type: web
+    name: fa-ai-agent-backend
+    env: node
+    plan: free
+    buildCommand: cd server && npm install
+    startCommand: cd server && npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 10000
+      - key: MONGODB_URI
+        fromDatabase:
+          name: fa-ai-agent-db
+          property: connectionString
+      - key: DB_NAME
+        value: fa_agent
+      - key: SESSION_SECRET
+        generateValue: true
+      - key: FRONTEND_URL
+        fromService:
+          type: web
+          name: fa-ai-agent-frontend
+          envVarKey: RENDER_EXTERNAL_URL
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false
+      - key: GOOGLE_REFRESH_TOKEN
+        sync: false
+      - key: HUBSPOT_ACCESS_TOKEN
+        sync: false
+
+  # Frontend React App
+  - type: web
+    name: fa-ai-agent-frontend
+    env: static
+    plan: free
+    buildCommand: cd client && npm install && npm run build
+    staticPublishPath: ./client/build
+    envVars:
+      - key: REACT_APP_API_URL
+        fromService:
+          type: web
+          name: fa-ai-agent-backend
+          envVarKey: RENDER_EXTERNAL_URL
+
+  # MongoDB Database
+  - type: pserv
+    name: fa-ai-agent-db
+    plan: free
+    env: docker
+    dockerfilePath: ./Dockerfile.mongodb
+    envVars:
+      - key: MONGO_INITDB_ROOT_USERNAME
+        value: admin
+      - key: MONGO_INITDB_ROOT_PASSWORD
+        generateValue: true
+      - key: MONGO_INITDB_DATABASE
+        value: fa_agent

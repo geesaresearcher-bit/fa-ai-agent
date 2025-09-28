@@ -1,150 +1,166 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import Sidebar from '../components/Sidebar.jsx';
-import { whoAmI, sendMessage, getConversationMessages } from '../api';
+import { whoAmI, sendMessage, getConversationMessages, logout } from '../api';
 
-export default function Chat() {
+export default function Chat({ me, onAuthChanged }) {
   const navigate = useNavigate();
-  const [me, setMe] = React.useState(null);
   const [threadId, setThreadId] = React.useState(localStorage.getItem('threadId') || '');
   const [messages, setMessages] = React.useState([]);
   const [input, setInput] = React.useState('');
   const [sending, setSending] = React.useState(false);
+  const [loading, setLoading] = React.useState(false);
+  const [activeTab, setActiveTab] = React.useState('chat');
+  const isDesktop = useMedia('(min-width: 1024px)');
 
-  // Load profile/session
-  React.useEffect(() => {
-    let alive = true;
-    (async () => {
-      try {
-        const data = await whoAmI();
-        if (alive) setMe(data);
-      } catch {
-        if (alive) navigate('/login', { replace: true });
-      }
-    })();
-    return () => { alive = false; };
-  }, [navigate]);
+  const endRef = React.useRef(null);
+  React.useEffect(() => { endRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages]);
 
-  // Load messages for selected thread
-  const loadThread = React.useCallback(async (id) => {
+  React.useEffect(() => { loadThread(threadId); }, [threadId]);
+
+  async function loadThread(id) {
     if (!id) {
       setMessages([{ from: 'bot', text: 'New chat started. How can I help?' }]);
       return;
     }
     try {
       const data = await getConversationMessages(id);
-      const mapped = data.messages.map(m => ({ from: m.role === 'user' ? 'me' : 'bot', text: m.content }));
-      setMessages(mapped.length ? mapped : [{ from: 'bot', text: 'This conversation has no messages yet.' }]);
-    } catch (e) {
-      // unauthorized handled at whoAmI
+      if (data.messages.length === 0) {
+        setMessages([{ from: 'bot', text: 'New chat started. How can I help?' }]);
+        return;
+      }
+      setMessages(data.messages.map(m => ({ from: m.role === 'user' ? 'me' : 'bot', text: m.content })));
+    } catch {
       setMessages([{ from: 'bot', text: 'Unable to load messages.' }]);
     }
-  }, []);
-
-  React.useEffect(() => { loadThread(threadId); }, [threadId, loadThread]);
-
-  // When user selects a conversation in sidebar
-  function onSelectConversation(id) {
-    setThreadId(id || '');
-    if (id) localStorage.setItem('threadId', id); else localStorage.removeItem('threadId');
   }
 
-  // When a new conversation is created from sidebar
-  function onNewConversation(id) {
-    onSelectConversation(id);
+  function onSelectConversation(id) {
+    setThreadId(id || '');
+    id ? localStorage.setItem('threadId', id) : localStorage.removeItem('threadId');
+    if (!isDesktop) setActiveTab('chat');
   }
 
   async function onSend() {
     const text = input.trim();
     if (!text) return;
     setInput('');
+    setLoading(true);
     setMessages(m => [...m, { from: 'me', text }]);
     setSending(true);
     try {
       const data = await sendMessage(text, threadId);
-      // if backend created a new conversation, capture it
-      if (data.threadId && data.threadId !== threadId) {
+      if (data.threadId) {
         setThreadId(data.threadId);
         localStorage.setItem('threadId', data.threadId);
       }
       setMessages(m => [...m, { from: 'bot', text: data.reply || 'Done.' }]);
     } catch (e) {
-      if (e.message === 'unauthorized') {
-        alert('Your session ended. Please login again.');
-        navigate('/login', { replace: true });
-      } else {
-        setMessages(m => [...m, { from: 'bot', text: 'Something went wrong.' }]);
-      }
+      if (e.message === 'unauthorized') onAuthChanged(); // This will trigger a re-check of auth status
+      else setMessages(m => [...m, { from: 'bot', text: 'Something went wrong.' }]);
     } finally {
+      setLoading(false);
       setSending(false);
     }
   }
 
   async function onLogout() {
-    try { await fetch(`${import.meta.env.VITE_BACKEND_URL}/auth/logout`, { method: 'POST', credentials: 'include' }); } catch {}
-    navigate('/login', { replace: true });
+    localStorage.clear();
+    await logout();
+    onAuthChanged(); // This will trigger a re-check of auth status
   }
 
-  if (!me) return <div style={styles.center}>Loading…</div>;
+  function TypingLoader() {
+    return (
+      <div className="typing-loader">
+        <span></span>
+        <span></span>
+        <span></span>
+      </div>
+    );
+  }
+
+  if (!me) return <div className="chat" style={{ margin: 16 }}>Loading…</div>;
 
   return (
-    <div style={styles.container}>
-      <Sidebar
-        activeId={threadId}
-        onSelect={onSelectConversation}
-        onNew={(id) => onNewConversation(id)}
-      />
+    <div className="app-container">
+      <Sidebar activeId={threadId} onSelect={onSelectConversation} onNew={id => onSelectConversation(id)} />
 
-      <div style={styles.main}>
-        <header style={styles.header}>
+      <div className="main">
+        <header className="header">
           <div>
             <strong>Financial Advisor AI Agent</strong>
-            <div style={styles.subheader}>
-              {me.email} {me.hasHubSpot ? '• HubSpot Connected' : '• Connecting HubSpot…'}
-            </div>
+            <div className="subheader">{me.email} {me.hasHubSpot ? '• HubSpot Connected' : '• Connecting HubSpot…'}</div>
           </div>
-          <button onClick={onLogout} style={styles.logout}>Logout</button>
+          <button onClick={onLogout} className="btn-outline">Logout</button>
         </header>
 
-        <main style={styles.chat}>
-          {messages.map((m, i) => (
-            <div key={i} style={{ textAlign: m.from === 'me' ? 'right' : 'left' }}>
-              <div style={{ ...styles.bubble, background: m.from === 'me' ? '#DCFCE7' : '#F3F4F6' }}>
-                <div style={{ fontSize: 12, color: '#6b7280' }}>{m.from}</div>
-                <div>{m.text}</div>
-              </div>
-            </div>
-          ))}
-        </main>
+        <div className="tabbar">
+          <button className={`tabbtn ${activeTab === 'chat' ? 'tabbtn--active' : ''}`} onClick={() => setActiveTab('chat')}>Chat</button>
+          <button className={`tabbtn ${activeTab === 'history' ? 'tabbtn--active' : ''}`} onClick={() => setActiveTab('history')}>History</button>
+        </div>
 
-        <footer style={styles.inputBar}>
-          <input
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && !sending && onSend()}
-            placeholder="Ask about clients or request actions…"
-            style={styles.input}
-            disabled={sending}
-          />
-          <button onClick={onSend} disabled={sending || !input.trim()} style={styles.send}>
-            {sending ? 'Sending…' : 'Send'}
-          </button>
-        </footer>
+        {isDesktop ? (
+          <>
+            <main className="chat">
+              {messages.map((m, i) => (
+                <div key={i} style={{ textAlign: m.from === 'me' ? 'right' : 'left' }}>
+                  <div className={`bubble ${m.from === 'me' ? 'bubble--me' : ''}`}>
+                    <div className="bubble-meta">{m.from}</div>
+                    <div>{m.text}</div>
+                  </div>
+                </div>
+              ))}
+              {loading && (
+                <div className="bubble bot">
+                  <TypingLoader />
+                </div>
+              )}
+              <div ref={endRef} />
+            </main>
+            <footer className="inputbar">
+              <input value={input} onChange={e => setInput(e.target.value)} onKeyDown={e => e.key === 'Enter' && !sending && onSend()} placeholder="Ask about clients or request actions…" className="input" disabled={sending} />
+              <button onClick={onSend} disabled={sending || !input.trim()} className="btn-send">{sending ? 'Sending…' : 'Send'}</button>
+            </footer>
+          </>
+        ) : activeTab === 'chat' ? (
+          <>
+            <main className="chat">
+              {messages.map((m, i) => (
+                <div key={i} style={{ textAlign: m.from === 'me' ? 'right' : 'left' }}>
+                  <div className={`bubble ${m.from === 'me' ? 'bubble--me' : ''}`}>
+                    <div className="bubble-meta">{m.from}</div>
+                    <div>{m.text}</div>
+                  </div>
+                </div>
+              ))}
+              {loading && (
+                <div className="bubble bot">
+                  <TypingLoader />
+                </div>
+              )}
+              <div ref={endRef} />
+            </main>
+            <footer className="inputbar">
+              <input value={input} onChange={e => setInput(e.target.value)} onKeyDown={e => e.key === 'Enter' && !sending && onSend()} placeholder="Ask about clients or request actions…" className="input" disabled={sending} />
+              <button onClick={onSend} disabled={sending || !input.trim()} className="btn-send">{sending ? 'Sending…' : 'Send'}</button>
+            </footer>
+          </>
+        ) : (
+          <Sidebar mobile activeId={threadId} onSelect={onSelectConversation} onNew={id => onSelectConversation(id)} />
+        )}
       </div>
     </div>
   );
 }
 
-const styles = {
-  center: { minHeight: '100vh', display: 'grid', placeItems: 'center', fontFamily: 'system-ui' },
-  container: { display: 'grid', gridTemplateColumns: '280px 1fr', height: '100vh', fontFamily: 'system-ui' },
-  main: { display: 'flex', flexDirection: 'column', padding: 16 },
-  header: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
-  subheader: { fontSize: 12, color: '#6b7280' },
-  logout: { padding: '8px 10px', borderRadius: 8, border: '1px solid #e5e7eb', background: 'white' },
-  chat: { border: '1px solid #e5e7eb', borderRadius: 12, flex: 1, padding: 12, overflowY: 'auto' },
-  bubble: { display: 'inline-block', padding: 10, borderRadius: 10, margin: '6px 0', maxWidth: '75%' },
-  inputBar: { display: 'flex', gap: 8, marginTop: 12 },
-  input: { flex: 1, padding: 12, borderRadius: 10, border: '1px solid #e5e7eb' },
-  send: { padding: '12px 14px', borderRadius: 10, background: '#111827', color: 'white', border: 'none' }
-};
+function useMedia(query) {
+  const [match, setMatch] = React.useState(() => window.matchMedia(query).matches);
+  React.useEffect(() => {
+    const m = window.matchMedia(query);
+    const handler = () => setMatch(m.matches);
+    m.addEventListener ? m.addEventListener('change', handler) : m.addListener(handler);
+    return () => m.removeEventListener ? m.removeEventListener('change', handler) : m.removeListener(handler);
+  }, [query]);
+  return match;
+}
