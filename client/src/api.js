@@ -1,4 +1,4 @@
-const BASE = process.env.REACT_APP_BACKEND_URL || 'http://localhost:4000';
+const BASE = process.env.REACT_APP_API_URL || 'http://localhost:4000';
 
 export async function whoAmI() {
   const res = await fetch(`${BASE}/auth/me`, {

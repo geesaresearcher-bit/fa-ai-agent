@@ -34,6 +34,16 @@ services:
         sync: false
       - key: HUBSPOT_ACCESS_TOKEN
         sync: false
+      - key: BACKEND_URL
+        value: https://fa-ai-agent-backend.onrender.com
+      - key: GOOGLE_OAUTH_CALLBACK
+        value: https://fa-ai-agent-backend.onrender.com/auth/google/callback
+      - key: HUBSPOT_CLIENT_ID
+        sync: false
+      - key: HUBSPOT_CLIENT_SECRET
+        sync: false
+      - key: HUBSPOT_OAUTH_CALLBACK
+        value: https://fa-ai-agent-backend.onrender.com/auth/hubspot/callback
 
   # Frontend React App
   - type: web
