@@ -164,8 +164,27 @@ router.get('/me', async (req, res) => {
     console.log('[/me] Session check:', {
         sessionId: req.sessionID,
         userId: req.session?.userId,
-        session: req.session
+        session: req.session,
+        cookies: req.headers.cookie,
+        origin: req.headers.origin,
+        referer: req.headers.referer
     });
+    
+    // Check if session exists in store
+    if (req.session) {
+        console.log('[/me] Session exists, checking store...');
+        // Try to reload session from store
+        req.session.reload((err) => {
+            if (err) {
+                console.log('[/me] Session reload error:', err);
+            } else {
+                console.log('[/me] Session reloaded:', {
+                    sessionId: req.sessionID,
+                    userId: req.session?.userId
+                });
+            }
+        });
+    }
     
     // "soft" me endpoint (doesn't force both tokens, just reports)
     if (!req.session?.userId) {

@@ -50,7 +50,8 @@ app.use(session({
     mongoUrl: process.env.MONGODB_URI,
     dbName: process.env.DB_NAME || 'fa_agent',
     collectionName: 'sessions',
-    stringify: false
+    stringify: false,
+    touchAfter: 24 * 3600 // lazy session update
   })
 }));
 
@@ -106,6 +107,27 @@ app.get('/test-cookie', (req, res) => {
     userId: req.session?.userId,
     cookies: req.headers.cookie,
     message: 'Test cookie set'
+  });
+});
+
+// Session debug endpoint
+app.get('/debug-session', (req, res) => {
+  console.log('Session debug:', {
+    sessionId: req.sessionID,
+    userId: req.session?.userId,
+    session: req.session,
+    cookies: req.headers.cookie,
+    origin: req.headers.origin,
+    referer: req.headers.referer
+  });
+  
+  res.json({
+    sessionId: req.sessionID,
+    userId: req.session?.userId,
+    session: req.session,
+    cookies: req.headers.cookie,
+    origin: req.headers.origin,
+    referer: req.headers.referer
   });
 });
 
