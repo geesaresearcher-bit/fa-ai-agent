@@ -116,10 +116,6 @@ router.get('/google/callback', async (req, res) => {
 
 /* ===== HubSpot OAuth ===== */
 router.get('/hubspot', (req, res) => {
-    if (!req.session?.userId) {
-        // must be logged in via Google first to have a session
-        return res.redirect(`${process.env.BACKEND_URL}/auth/google`);
-    }
     const scope = [
         'crm.objects.contacts.read',
         'crm.objects.contacts.write',
