@@ -14,6 +14,12 @@ const googleClient = new google.auth.OAuth2(
 );
 
 router.get('/google', (req, res) => {
+    console.log('Google OAuth configuration:', {
+        clientId: process.env.GOOGLE_CLIENT_ID,
+        callback: process.env.GOOGLE_OAUTH_CALLBACK,
+        hasClientSecret: !!process.env.GOOGLE_CLIENT_SECRET
+    });
+    
     const url = googleClient.generateAuthUrl({
         access_type: 'offline',
         scope: [
@@ -26,12 +32,27 @@ router.get('/google', (req, res) => {
         ],
         prompt: 'consent'
     });
+    
+    console.log('Generated OAuth URL:', url);
     res.redirect(url);
 });
 
 router.get('/google/callback', async (req, res) => {
     try {
+        console.log('Google OAuth callback received:', {
+            code: req.query.code ? 'present' : 'missing',
+            error: req.query.error,
+            state: req.query.state,
+            query: req.query
+        });
+        
         const { code } = req.query;
+        if (!code) {
+            console.error('No authorization code received');
+            return res.status(400).send('No authorization code received');
+        }
+        
+        console.log('Exchanging code for tokens...');
         const { tokens } = await googleClient.getToken(code);
         googleClient.setCredentials(tokens);
 
