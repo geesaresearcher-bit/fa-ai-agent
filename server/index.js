@@ -17,7 +17,10 @@ import './worker.js';
 const app = express();
 app.use(cors({
   origin: process.env.FRONTEND_URL,
-  credentials: true
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'Cookie'],
+  exposedHeaders: ['Set-Cookie']
 }));
 app.use(cookieParser());
 app.use(bodyParser.json({ limit: '2mb' }));
@@ -38,9 +41,10 @@ app.use(session({
   saveUninitialized: false,
   cookie: {
     httpOnly: true,
-    sameSite: 'lax',
+    sameSite: 'none', // Allow cross-site cookies
     secure: process.env.NODE_ENV === 'production', // enable in production with HTTPS
-    maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days (session lifetime)
+    maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days (session lifetime)
+    domain: undefined // Don't restrict domain
   },
   store: MongoStore.create({
     mongoUrl: process.env.MONGODB_URI,
@@ -77,6 +81,31 @@ app.get('/health', (req, res) => {
     timestamp: new Date().toISOString(),
     environment: process.env.NODE_ENV,
     port: process.env.PORT
+  });
+});
+
+// Cookie test endpoint
+app.get('/test-cookie', (req, res) => {
+  console.log('Cookie test:', {
+    sessionId: req.sessionID,
+    userId: req.session?.userId,
+    cookies: req.headers.cookie,
+    origin: req.headers.origin,
+    referer: req.headers.referer
+  });
+  
+  res.cookie('test-cookie', 'test-value', {
+    httpOnly: true,
+    sameSite: 'none',
+    secure: process.env.NODE_ENV === 'production',
+    maxAge: 24 * 60 * 60 * 1000 // 1 day
+  });
+  
+  res.json({
+    sessionId: req.sessionID,
+    userId: req.session?.userId,
+    cookies: req.headers.cookie,
+    message: 'Test cookie set'
   });
 });
 

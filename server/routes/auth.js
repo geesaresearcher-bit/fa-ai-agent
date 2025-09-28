@@ -60,6 +60,15 @@ router.get('/google/callback', async (req, res) => {
             userId: user._id,
             email: user.email
         });
+        
+        // Ensure session is saved
+        req.session.save((err) => {
+            if (err) {
+                console.error('Session save error:', err);
+            } else {
+                console.log('Session saved successfully');
+            }
+        });
 
         // If HubSpot not connected, go connect it next
         if (!user.hubspot_tokens?.access_token) {
