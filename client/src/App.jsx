@@ -7,11 +7,22 @@ import Chat from './components/Chat';
 export default function App() {
   const [state, setState] = React.useState({ loading: true, user: null });
 
-  const load = React.useCallback(async () => {
+  const load = React.useCallback(async (retryCount = 0) => {
     try {
+      console.log('Checking authentication...', retryCount > 0 ? `(retry ${retryCount})` : '');
       const me = await whoAmI();
+      console.log('User authenticated:', me);
       setState({ loading: false, user: me });
-    } catch {
+    } catch (error) {
+      console.log('Authentication failed:', error);
+      
+      // If we're on /chat and auth fails, wait a bit and retry (OAuth might still be processing)
+      if (window.location.pathname === '/chat' && retryCount < 3) {
+        console.log('Retrying authentication in 1 second...');
+        setTimeout(() => load(retryCount + 1), 1000);
+        return;
+      }
+      
       setState({ loading: false, user: null });
     }
   }, []);
@@ -21,7 +32,10 @@ export default function App() {
   if (state.loading) {
     return (
       <div style={styles.container}>
-        <div style={styles.card}><h3>Loading…</h3></div>
+        <div style={styles.card}>
+          <h3>Loading…</h3>
+          <p>Checking authentication...</p>
+        </div>
       </div>
     );
   }

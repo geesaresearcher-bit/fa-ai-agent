@@ -1,12 +1,20 @@
 const BASE = process.env.REACT_APP_API_URL || 'http://localhost:4000';
 
 export async function whoAmI() {
+  console.log('Making request to:', `${BASE}/auth/me`);
   const res = await fetch(`${BASE}/auth/me`, {
     method: 'GET',
     credentials: 'include'
   });
-  if (!res.ok) throw new Error('unauthorized');
-  return res.json();
+  console.log('Response status:', res.status);
+  if (!res.ok) {
+    const errorText = await res.text();
+    console.error('Auth error:', errorText);
+    throw new Error(`unauthorized: ${res.status} ${errorText}`);
+  }
+  const data = await res.json();
+  console.log('Auth response:', data);
+  return data;
 }
 
 export function googleLoginUrl() {
