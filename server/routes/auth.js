@@ -102,6 +102,7 @@ router.get('/google/callback', async (req, res) => {
 
         // If HubSpot not connected, go connect it next
         if (!user.hubspot_tokens?.access_token) {
+            console.log('HubSpot not connected, redirecting to connect it', `${process.env.BACKEND_URL}/auth/hubspot`);
             return res.redirect(`${process.env.BACKEND_URL}/auth/hubspot`);
         }
 
