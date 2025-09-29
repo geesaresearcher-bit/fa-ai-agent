@@ -19,6 +19,8 @@ services:
         value: fa_agent
       - key: SESSION_SECRET
         generateValue: true
+      - key: JWT_SECRET
+        generateValue: true
       - key: FRONTEND_URL
         fromService:
           type: web

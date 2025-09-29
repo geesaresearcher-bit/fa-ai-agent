@@ -1,10 +1,8 @@
 const BASE = process.env.REACT_APP_API_URL || 'http://localhost:4000';
 
 export async function whoAmI() {
-  const userId = localStorage.getItem('userId');
-  const url = userId ? `${BASE}/auth/me?userId=${userId}` : `${BASE}/auth/me`;
-  console.log('Making request to:', url);
-  const res = await fetch(url, {
+  console.log('Making request to:', `${BASE}/auth/me`);
+  const res = await fetch(`${BASE}/auth/me`, {
     method: 'GET',
     credentials: 'include'
   });
@@ -28,15 +26,11 @@ export async function logout() {
     method: 'POST',
     credentials: 'include'
   });
-  // Clear localStorage on logout
-  localStorage.removeItem('userId');
   return res.json();
 }
 
 export async function sendMessage(message, threadId) {
-  const userId = localStorage.getItem('userId');
-  const url = userId ? `${BASE}/chat/message?userId=${userId}` : `${BASE}/chat/message`;
-  const res = await fetch(url, {
+  const res = await fetch(`${BASE}/chat/message`, {
     method: 'POST',
     credentials: 'include',
     headers: { 'Content-Type': 'application/json' },
@@ -51,17 +45,13 @@ export async function sendMessage(message, threadId) {
 }
 
 export async function listConversations() {
-  const userId = localStorage.getItem('userId');
-  const url = userId ? `${BASE}/conversations?userId=${userId}` : `${BASE}/conversations`;
-  const res = await fetch(url, { credentials: 'include' });
+  const res = await fetch(`${BASE}/conversations`, { credentials: 'include' });
   if (!res.ok) throw new Error('unauthorized');
   return res.json();
 }
 
 export async function createConversation(title) {
-  const userId = localStorage.getItem('userId');
-  const url = userId ? `${BASE}/conversations?userId=${userId}` : `${BASE}/conversations`;
-  const res = await fetch(url, {
+  const res = await fetch(`${BASE}/conversations`, {
     method: 'POST',
     credentials: 'include',
     headers: { 'Content-Type': 'application/json' },
@@ -72,17 +62,13 @@ export async function createConversation(title) {
 }
 
 export async function getConversationMessages(id) {
-  const userId = localStorage.getItem('userId');
-  const url = userId ? `${BASE}/conversations/${id}/messages?userId=${userId}` : `${BASE}/conversations/${id}/messages`;
-  const res = await fetch(url, { credentials: 'include' });
+  const res = await fetch(`${BASE}/conversations/${id}/messages`, { credentials: 'include' });
   if (!res.ok) throw new Error('unauthorized');
   return res.json();
 }
 
 export async function renameConversation(id, title) {
-  const userId = localStorage.getItem('userId');
-  const url = userId ? `${BASE}/conversations/${id}?userId=${userId}` : `${BASE}/conversations/${id}`;
-  const res = await fetch(url, {
+  const res = await fetch(`${BASE}/conversations/${id}`, {
     method: 'PATCH',
     credentials: 'include',
     headers: { 'Content-Type': 'application/json' },
@@ -93,9 +79,7 @@ export async function renameConversation(id, title) {
 }
 
 export async function deleteConversation(id) {
-  const userId = localStorage.getItem('userId');
-  const url = userId ? `${BASE}/conversations/${id}?userId=${userId}` : `${BASE}/conversations/${id}`;
-  const res = await fetch(url, {
+  const res = await fetch(`${BASE}/conversations/${id}`, {
     method: 'DELETE',
     credentials: 'include'
   });

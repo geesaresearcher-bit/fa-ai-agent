@@ -4,6 +4,7 @@ import { google } from 'googleapis';
 import axios from 'axios';
 import { getDb } from '../lib/db.js';
 import { ObjectId } from 'mongodb';
+import jwt from 'jsonwebtoken';
 
 const router = express.Router();
 
@@ -75,22 +76,18 @@ router.get('/google/callback', async (req, res) => {
             { upsert: true, returnDocument: 'after' }
         );
 
-        // start session
-        req.session.userId = user._id.toString();
-        console.log('Session set:', {
-            sessionId: req.sessionID,
-            userId: req.session.userId,
-            user_id_type: typeof user._id,
-            session_userId_type: typeof req.session.userId
-        });
-        console.log('[/google/callback] Session set:', {
-            sessionId: req.sessionID,
-            userId: user._id,
-            email: user.email
-        });
-        console.log(process.env.NODE_ENV);
-        // Set cookie manually to ensure proper configuration
-        res.cookie('sid', req.sessionID, {
+        // Create JWT token with userId
+        const jwtSecret = process.env.JWT_SECRET || 'dev_jwt_secret';
+        const token = jwt.sign(
+            { userId: user._id.toString(), email: user.email },
+            jwtSecret,
+            { expiresIn: '7d' }
+        );
+        
+        console.log('JWT token created for user:', user._id.toString());
+        
+        // Set JWT token in httpOnly cookie
+        res.cookie('auth_token', token, {
             httpOnly: true,
             sameSite: 'none',
             secure: process.env.NODE_ENV === 'production',
@@ -141,13 +138,11 @@ router.get('/google/callback', async (req, res) => {
         // If HubSpot not connected, go connect it next
         if (!user.hubspot_tokens?.access_token) {
             console.log('HubSpot not connected, redirecting to connect it', `${process.env.BACKEND_URL}/auth/hubspot`);
-            
-            // Pass user ID directly in URL to avoid session issues
-            return res.redirect(`${process.env.BACKEND_URL}/auth/hubspot?userId=${user._id.toString()}`);
+            return res.redirect(`${process.env.BACKEND_URL}/auth/hubspot`);
         }
 
-        // Both connected: go to chat with userId in localStorage
-        return res.redirect(`${process.env.FRONTEND_URL}/chat?userId=${user._id.toString()}`);
+        // Both connected: go to chat
+        return res.redirect(`${process.env.FRONTEND_URL}/chat`);
     } catch (err) {
         console.error('[google/callback] error', err?.response?.data || err);
         return res.status(500).send('Google auth failed');
@@ -279,7 +274,7 @@ router.get('/hubspot/callback', async (req, res) => {
             }
         );
 
-        return res.redirect(`${process.env.FRONTEND_URL}/chat?userId=${userId}`);
+        return res.redirect(`${process.env.FRONTEND_URL}/chat`);
     } catch (err) {
         console.error('[hubspot/callback] error', err?.response?.data || err);
         return res.status(500).send('HubSpot auth failed');
@@ -290,92 +285,34 @@ router.get('/hubspot/callback', async (req, res) => {
 router.post('/logout', (req, res) => {
     if (req.session) req.session.destroy(() => { });
     res.clearCookie('sid');
+    res.clearCookie('auth_token');
     res.json({ ok: true });
 });
 
 router.get('/me', async (req, res) => {
-    console.log('[/me] Session check:', {
-        sessionId: req.sessionID,
-        userId: req.session?.userId,
-        session: req.session,
+    console.log('[/me] Request received:', {
         cookies: req.headers.cookie,
         origin: req.headers.origin,
         referer: req.headers.referer
     });
     
-    let userId = null;
-    
-    // Method 1: Try to get userId from localStorage (passed via URL parameter)
-    if (req.query.userId) {
-        userId = req.query.userId;
-        console.log('[/me] Using userId from localStorage (URL parameter):', userId);
-    }
-    
-    // Method 2: Try to get userId from session document in database
     try {
+        // Get JWT token from cookie
+        const token = req.cookies.auth_token;
+        if (!token) {
+            console.log('[/me] No auth token found');
+            return res.status(401).json({ error: 'Not logged in' });
+        }
+        
+        // Verify JWT token
+        const jwtSecret = process.env.JWT_SECRET || 'dev_jwt_secret';
+        const decoded = jwt.verify(token, jwtSecret);
+        const userId = decoded.userId;
+        
+        console.log('[/me] JWT token verified, userId:', userId);
+        
+        // Find user in database
         const db = getDb();
-        if (db) {
-            console.log('[/me] Looking for session document with ID:', req.sessionID);
-            
-            // First, let's see what sessions exist
-            const allSessions = await db.collection('sessions').find({}).limit(5).toArray();
-            console.log('[/me] All sessions in database:', allSessions.map(s => ({
-                _id: s._id,
-                hasSession: !!s.session,
-                hasUserId: !!(s.session && s.session.userId)
-            })));
-            
-            const sessionDoc = await db.collection('sessions').findOne({ _id: req.sessionID });
-            console.log('[/me] Session document found:', sessionDoc);
-            
-            if (sessionDoc && sessionDoc.session && sessionDoc.session.userId) {
-                userId = sessionDoc.session.userId;
-                console.log('[/me] Found userId in session document:', userId);
-            } else {
-                console.log('[/me] No session document found in database or missing userId');
-            }
-        }
-    } catch (dbErr) {
-        console.error('[/me] Database lookup error:', dbErr);
-    }
-    
-    // Method 3: If still no userId, try to get from headers (if passed)
-    if (!userId && req.headers['x-user-id']) {
-        userId = req.headers['x-user-id'];
-        console.log('[/me] Using userId from header:', userId);
-    }
-    
-    // Method 4: If still no userId, try to get from cookie (if stored)
-    if (!userId && req.cookies.userId) {
-        userId = req.cookies.userId;
-        console.log('[/me] Using userId from cookie:', userId);
-    }
-    
-    // Method 5: TEMPORARY FALLBACK - Get most recent user (for testing)
-    if (!userId) {
-        try {
-            const db = getDb();
-            if (db) {
-                const recentUser = await db.collection('users').findOne({}, { sort: { updated_at: -1 } });
-                if (recentUser) {
-                    userId = recentUser._id.toString();
-                    console.log('[/me] TEMPORARY: Using most recent user:', userId);
-                }
-            }
-        } catch (err) {
-            console.error('[/me] Error getting recent user:', err);
-        }
-    }
-    
-    // If still no userId, return unauthorized
-    if (!userId) {
-        console.log('[/me] No userId found from any source');
-        return res.status(401).json({ error: 'Not logged in' });
-    }
-    
-    // Find user in database
-    try {
-    const db = getDb();
         if (!db) {
             console.log('[/me] Database not available');
             return res.status(500).json({ error: 'Database not available' });
@@ -393,14 +330,14 @@ router.get('/me', async (req, res) => {
             hasHubSpot: !!user.hubspot_tokens?.access_token 
         });
         
-    res.json({
-        email: user.email,
-        hasGoogle: !!user.google_tokens,
-        hasHubSpot: !!user.hubspot_tokens?.access_token
-    });
+        res.json({
+            email: user.email,
+            hasGoogle: !!user.google_tokens,
+            hasHubSpot: !!user.hubspot_tokens?.access_token
+        });
     } catch (err) {
-        console.error('[/me] Error finding user:', err);
-        return res.status(500).json({ error: 'Database error' });
+        console.error('[/me] JWT verification error:', err);
+        return res.status(401).json({ error: 'Invalid token' });
     }
 });
 
