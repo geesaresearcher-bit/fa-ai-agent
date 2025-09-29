@@ -129,14 +129,58 @@ router.get('/hubspot', (req, res) => {
     console.log('HubSpot OAuth check:', {
         sessionId: req.sessionID,
         userId: req.session?.userId,
-        cookies: req.headers.cookie
+        cookies: req.headers.cookie,
+        session: req.session
     });
     
-    if (!req.session?.userId) {
-        console.log('No session found, redirecting to Google OAuth');
-        // must be logged in via Google first to have a session
-        return res.redirect(`${process.env.BACKEND_URL}/auth/google`);
+    // Try to reload session from store
+    if (req.session) {
+        req.session.reload((err) => {
+            if (err) {
+                console.log('Session reload error:', err);
+            } else {
+                console.log('Session reloaded:', {
+                    sessionId: req.sessionID,
+                    userId: req.session?.userId
+                });
+            }
+        });
     }
+    
+    if (!req.session?.userId) {
+        console.log('No session found, trying direct database lookup...');
+        
+        // Try to find session in database directly
+        const db = getDb();
+        if (db) {
+            db.collection('sessions').findOne({ _id: req.sessionID })
+                .then(sessionDoc => {
+                    if (sessionDoc && sessionDoc.session && sessionDoc.session.userId) {
+                        console.log('Found session in database:', sessionDoc.session.userId);
+                        req.session.userId = sessionDoc.session.userId;
+                        // Continue with HubSpot OAuth
+                        proceedWithHubSpotOAuth(req, res);
+                    } else {
+                        console.log('No session found in database, redirecting to Google OAuth');
+                        return res.redirect(`${process.env.BACKEND_URL}/auth/google`);
+                    }
+                })
+                .catch(dbErr => {
+                    console.error('Database lookup error:', dbErr);
+                    return res.redirect(`${process.env.BACKEND_URL}/auth/google`);
+                });
+        } else {
+            console.log('Database not available, redirecting to Google OAuth');
+            return res.redirect(`${process.env.BACKEND_URL}/auth/google`);
+        }
+        return; // Don't continue with the rest of the function
+    }
+    
+    proceedWithHubSpotOAuth(req, res);
+});
+
+function proceedWithHubSpotOAuth(req, res) {
+    console.log('Proceeding with HubSpot OAuth for user:', req.session?.userId);
     
     // Ensure session cookie is set for this request
     res.cookie('sid', req.sessionID, {
@@ -165,7 +209,7 @@ router.get('/hubspot', (req, res) => {
     
     console.log('HubSpot OAuth URL:', url);
     res.redirect(url);
-});
+}
 
 router.get('/hubspot/callback', async (req, res) => {
     try {
