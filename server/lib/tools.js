@@ -3,10 +3,11 @@ import axios from 'axios';
 import OpenAI from 'openai';
 import { getDb } from './db.js';
 import { queryRAG } from './rag.js';
+import { ObjectId } from 'mongodb';
 
 export async function sendEmailTool(userId, { to, subject, body }) {
     const db = getDb();
-    const user = await db.collection('users').findOne({ _id: userId });
+    const user = await db.collection('users').findOne({ _id: new ObjectId(String(userId)) });
     if (!user?.google_tokens) return { ok: false, error: 'Google not connected' };
 
     const auth = new google.auth.OAuth2();
@@ -27,7 +28,7 @@ export async function scheduleEventTool(
     { start, end, attendees = [], title, description, timeZone = 'Asia/Colombo' }
 ) {
     const db = getDb();
-    const user = await db.collection('users').findOne({ _id: userId });
+    const user = await db.collection('users').findOne({ _id: new ObjectId(String(userId)) });
     if (!user?.google_tokens) return { ok: false, error: 'Google not connected' };
 
     // Make sure we have the required data
@@ -89,7 +90,7 @@ export async function scheduleEventTool(
 
 export async function getUpcomingEventsTool(userId, { timeframe = 'next 7 days' }) {
     const db = getDb();
-    const user = await db.collection('users').findOne({ _id: userId });
+    const user = await db.collection('users').findOne({ _id: new ObjectId(String(userId)) });
     if (!user?.google_tokens) return { ok: false, error: 'Google not connected' };
 
     const auth = new google.auth.OAuth2();
@@ -124,7 +125,7 @@ export async function getUpcomingEventsTool(userId, { timeframe = 'next 7 days' 
 
 export async function createHubspotContactTool(userId, { email, firstname, lastname }) {
     const db = getDb();
-    const user = await db.collection('users').findOne({ _id: userId });
+    const user = await db.collection('users').findOne({ _id: new ObjectId(String(userId)) });
     if (!user?.hubspot_tokens?.access_token) return { ok: false, error: 'HubSpot not connected' };
 
     const resp = await axios.post(
@@ -134,7 +135,7 @@ export async function createHubspotContactTool(userId, { email, firstname, lastn
     );
 
     await db.collection('hubspot_contacts').updateOne(
-        { user_id: userId, hubspot_id: resp.data.id },
+        { user_id: new ObjectId(String(userId)), hubspot_id: resp.data.id },
         { $set: { properties: resp.data.properties, updated_at: new Date() }, $setOnInsert: { created_at: new Date() } },
         { upsert: true }
     );
@@ -144,7 +145,7 @@ export async function createHubspotContactTool(userId, { email, firstname, lastn
 
 export async function updateHubspotContactTool(userId, { contactId, note }) {
     const db = getDb();
-    const user = await db.collection('users').findOne({ _id: userId });
+    const user = await db.collection('users').findOne({ _id: new ObjectId(String(userId)) });
     if (!user?.hubspot_tokens?.access_token) return { ok: false, error: 'HubSpot not connected' };
 
     // Add a note to the contact in HubSpot
@@ -166,7 +167,7 @@ export async function updateHubspotContactTool(userId, { contactId, note }) {
 
 export async function findHubspotContactTool(userId, { query }) {
     const db = getDb();
-    const user = await db.collection('users').findOne({ _id: userId });
+    const user = await db.collection('users').findOne({ _id: new ObjectId(String(userId)) });
     if (!user?.hubspot_tokens?.access_token) return { ok: false, error: 'HubSpot not connected' };
 
     // Look up contacts by email or name
@@ -199,7 +200,7 @@ export async function findHubspotContactTool(userId, { query }) {
 export async function createTaskTool(userId, { description, related_to, due_date }) {
     const db = getDb();
     const task = {
-        user_id: userId,
+        user_id: new ObjectId(String(userId)),
         status: 'pending',
         description,
         related_to: related_to || null,
@@ -214,7 +215,7 @@ export async function createTaskTool(userId, { description, related_to, due_date
 
 export async function checkTasksTool(userId, { status }) {
     const db = getDb();
-    const q = { user_id: userId };
+    const q = { user_id: new ObjectId(String(userId)) };
     if (status) q.status = status;
     const tasks = await db.collection('tasks').find(q).sort({ updated_at: -1 }).limit(50).toArray();
     return { ok: true, tasks };
@@ -223,7 +224,7 @@ export async function checkTasksTool(userId, { status }) {
 export async function completeTaskTool(userId, { taskId, notes }) {
     const db = getDb();
     await db.collection('tasks').updateOne(
-        { _id: taskId, user_id: userId },
+        { _id: taskId, user_id: new ObjectId(String(userId)) },
         {
             $set: { status: 'completed', updated_at: new Date() },
             $push: { history: { at: new Date(), action: 'completed', notes: notes || '' } }
@@ -235,7 +236,7 @@ export async function completeTaskTool(userId, { taskId, notes }) {
 export async function addInstructionTool(userId, { trigger, action, description }) {
     const db = getDb();
     const doc = {
-        user_id: userId,
+        user_id: new ObjectId(String(userId)),
         type: 'rule',
         trigger,  // e.g., "email_from_unknown", "calendar_event_created"
         action,   // e.g., "create_hubspot_contact_and_note", "email_attendees_with_brief"
@@ -250,14 +251,14 @@ export async function addInstructionTool(userId, { trigger, action, description 
 
 export async function listInstructionsTool(userId) {
     const db = getDb();
-    const rows = await db.collection('memories').find({ user_id: userId, type: 'rule', enabled: true }).toArray();
+    const rows = await db.collection('memories').find({ user_id: new ObjectId(String(userId)), type: 'rule', enabled: true }).toArray();
     return { ok: true, instructions: rows };
 }
 
 export async function removeInstructionTool(userId, { instructionId }) {
     const db = getDb();
     await db.collection('memories').updateOne(
-        { _id: instructionId, user_id: userId },
+        { _id: instructionId, user_id: new ObjectId(String(userId)) },
         { $set: { enabled: false, updated_at: new Date() } }
     );
     return { ok: true };
@@ -281,7 +282,7 @@ function buildOAuth2(user) {
 // Check if a time slot is available
 export async function getFreeBusyTool(userId, { startISO, endISO, timeZone = 'Asia/Colombo' }) {
     const db = getDb();
-    const user = await db.collection('users').findOne({ _id: userId });
+    const user = await db.collection('users').findOne({ _id: new ObjectId(String(userId)) });
     if (!user?.google_tokens) return { ok: false, error: 'Google not connected' };
 
     const auth = buildOAuth2(user);
@@ -316,7 +317,7 @@ export async function suggestSlotsTool(
     }
 ) {
     const db = getDb();
-    const user = await db.collection('users').findOne({ _id: userId });
+    const user = await db.collection('users').findOne({ _id: new ObjectId(String(userId)) });
     if (!user?.google_tokens) return { ok: false, error: 'Google not connected' };
 
     const auth = buildOAuth2(user);
@@ -373,7 +374,7 @@ export async function suggestSlotsTool(
 // Look up HubSpot contacts
 export async function findHubspotContactByEmail(userId, email) {
     const db = getDb();
-    const user = await db.collection('users').findOne({ _id: userId });
+    const user = await db.collection('users').findOne({ _id: new ObjectId(String(userId)) });
     const access = user?.hubspot_tokens?.access_token;
     if (!access) return { ok: false, error: 'HubSpot not connected' };
     try {
@@ -407,7 +408,7 @@ export async function ensureHubspotContactTool(userId, { email, firstname = '', 
 
     // Create new contact
     const db = getDb();
-    const user = await db.collection('users').findOne({ _id: userId });
+    const user = await db.collection('users').findOne({ _id: new ObjectId(String(userId)) });
     const access = user?.hubspot_tokens?.access_token;
     if (!access) return { ok: false, error: 'HubSpot not connected' };
 
@@ -420,7 +421,7 @@ export async function ensureHubspotContactTool(userId, { email, firstname = '', 
 
         // cache minimal record
         await db.collection('hubspot_contacts').updateOne(
-            { user_id: userId, hubspot_id: resp.data.id },
+            { user_id: new ObjectId(String(userId)), hubspot_id: resp.data.id },
             { $set: { properties: resp.data.properties, updated_at: new Date() }, $setOnInsert: { created_at: new Date() } },
             { upsert: true }
         );
@@ -473,7 +474,7 @@ Respond with JSON format:
 
 export async function manageEmailThreadTool(userId, { to, subject, body, threadId }) {
     const db = getDb();
-    const user = await db.collection('users').findOne({ _id: userId });
+    const user = await db.collection('users').findOne({ _id: new ObjectId(String(userId)) });
     if (!user?.google_tokens) return { ok: false, error: 'Google not connected' };
 
     const auth = new google.auth.OAuth2();
@@ -553,7 +554,7 @@ export async function proactiveAgentTool(userId, { eventType, eventData, context
 
         // Get all active instructions for this user
         const instructions = await db.collection('memories')
-            .find({ user_id: userId, type: 'rule', enabled: true })
+            .find({ user_id: new ObjectId(String(userId)), type: 'rule', enabled: true })
             .toArray();
 
         // Get RAG context for the event
