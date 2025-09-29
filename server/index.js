@@ -26,6 +26,18 @@ app.use(cors({
 app.use(cookieParser());
 app.use(bodyParser.json({ limit: '2mb' }));
 
+// Debug cookie parsing
+app.use((req, res, next) => {
+  if (req.path.includes('/chat/message')) {
+    console.log('Cookie debug:', {
+      path: req.path,
+      cookies: req.cookies,
+      cookieHeader: req.headers.cookie
+    });
+  }
+  next();
+});
+
 // Connect to database with error handling
 try {
   await connectDb();

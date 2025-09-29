@@ -30,7 +30,7 @@ import {
     checkHubspotContactCreatedTool
 } from '../lib/tools.js';
 import { ensureConversation, saveMessage, loadRecentMessages, maybeSetTitle, updateRollingSummaryIfNeeded } from '../lib/memory.js';
-
+import { ObjectId } from 'mongodb';
 const router = express.Router();
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
