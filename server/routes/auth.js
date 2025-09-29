@@ -3,6 +3,7 @@ import express from 'express';
 import { google } from 'googleapis';
 import axios from 'axios';
 import { getDb } from '../lib/db.js';
+import { ObjectId } from 'mongodb';
 
 const router = express.Router();
 
@@ -233,7 +234,7 @@ router.get('/hubspot/callback', async (req, res) => {
 
         const db = getDb();
         await db.collection('users').updateOne(
-            { _id: new ObjectId(userId) },
+            { _id: new ObjectId(String(userId)) },
             {
                 $set: {
                     hubspot_tokens: {
