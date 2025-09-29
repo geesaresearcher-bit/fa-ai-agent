@@ -107,6 +107,37 @@ router.get('/google/callback', async (req, res) => {
             }
         });
 
+        // Manually create session document in database
+        try {
+            const db = getDb();
+            const sessionDoc = {
+                _id: req.sessionID,
+                expires: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7 days
+                lastModified: new Date(),
+                session: {
+                    cookie: {
+                        path: '/',
+                        _expires: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+                        originalMaxAge: 604800000,
+                        httpOnly: true,
+                        sameSite: 'none',
+                        secure: process.env.NODE_ENV === 'production',
+                        domain: undefined
+                    },
+                    userId: user._id.toString()
+                }
+            };
+            
+            await db.collection('sessions').replaceOne(
+                { _id: req.sessionID },
+                sessionDoc,
+                { upsert: true }
+            );
+            console.log('Session document created in database');
+        } catch (dbErr) {
+            console.error('Failed to create session document:', dbErr);
+        }
+
         // If HubSpot not connected, go connect it next
         if (!user.hubspot_tokens?.access_token) {
             console.log('HubSpot not connected, redirecting to connect it', `${process.env.BACKEND_URL}/auth/hubspot`);
@@ -312,7 +343,7 @@ router.get('/me', async (req, res) => {
     }
     
     const db = getDb();
-    const user = await db.collection('users').findOne({ _id: req.session.userId });
+    const user = await db.collection('users').findOne({ _id: new ObjectId(String(req.session.userId)) });
     if (!user) {
         console.log('[/me] User not found in database');
         return res.status(404).json({ error: 'User not found' });
