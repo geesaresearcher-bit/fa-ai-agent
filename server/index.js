@@ -11,6 +11,7 @@ import chatRoutes from './routes/chat.js';
 import taskRoutes from './routes/tasks.js';
 import webhookRoutes from './routes/webhooks.js';
 import conversationsRoutes from './routes/conversations.js';
+import { jwtAuth, jwtAuthWithUser } from './middleware/jwtAuth.js';
 
 import './worker.js';
 
@@ -72,10 +73,10 @@ app.use((req, res, next) => {
 });
 
 app.use('/auth', authRoutes);
-app.use('/chat', chatRoutes);
-app.use('/tasks', taskRoutes);
+app.use('/chat', jwtAuthWithUser, chatRoutes);
+app.use('/tasks', jwtAuthWithUser, taskRoutes);
 app.use('/webhook', webhookRoutes);
-app.use('/conversations', conversationsRoutes);
+app.use('/conversations', jwtAuthWithUser, conversationsRoutes);
 
 app.get('/', (req, res) => res.send('Financial Advisor AI Agent Backend'));
 

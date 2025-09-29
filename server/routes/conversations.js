@@ -1,12 +1,11 @@
 import express from 'express';
 import { ObjectId } from 'mongodb';
 import { getDb } from '../lib/db.js';
-import { sessionAuth } from '../middleware/sessionAuth.js';
 
 const router = express.Router();
 
 // List conversations (most recent first)
-router.get('/', sessionAuth, async (req, res) => {
+router.get('/', async (req, res) => {
   const db = getDb();
   const rows = await db.collection('conversations')
     .find({ user_id: req.userId })
@@ -18,7 +17,7 @@ router.get('/', sessionAuth, async (req, res) => {
 });
 
 // Create conversation (optional title)
-router.post('/', sessionAuth, async (req, res) => {
+router.post('/', async (req, res) => {
   const { title } = req.body || {};
   const db = getDb();
   const now = new Date();
@@ -34,7 +33,7 @@ router.post('/', sessionAuth, async (req, res) => {
 });
 
 // Get messages for a conversation
-router.get('/:id/messages', sessionAuth, async (req, res) => {
+router.get('/:id/messages', async (req, res) => {
   const { id } = req.params;
   const db = getDb();
 
@@ -53,7 +52,7 @@ router.get('/:id/messages', sessionAuth, async (req, res) => {
 });
 
 // Rename conversation
-router.patch('/:id', sessionAuth, async (req, res) => {
+router.patch('/:id', async (req, res) => {
   const { id } = req.params;
   const { title } = req.body || {};
   if (!title || !title.trim()) return res.status(400).json({ error: 'Title required' });
@@ -69,7 +68,7 @@ router.patch('/:id', sessionAuth, async (req, res) => {
 });
 
 // Delete conversation (and its messages)
-router.delete('/:id', sessionAuth, async (req, res) => {
+router.delete('/:id', async (req, res) => {
   const { id } = req.params;
   const db = getDb();
   const convo = await db.collection('conversations').findOne({ _id: new ObjectId(id), user_id: req.userId });

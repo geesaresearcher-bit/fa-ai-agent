@@ -30,7 +30,6 @@ import {
     checkHubspotContactCreatedTool
 } from '../lib/tools.js';
 import { ensureConversation, saveMessage, loadRecentMessages, maybeSetTitle, updateRollingSummaryIfNeeded } from '../lib/memory.js';
-import { sessionAuth } from '../middleware/sessionAuth.js';
 
 const router = express.Router();
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
@@ -379,7 +378,7 @@ const tools = [
     }
 ];
 
-router.post('/message', sessionAuth, async (req, res) => {
+router.post('/message', async (req, res) => {
     try {
         const userId = req.userId; // set by middleware
         const { message, threadId } = req.body;
