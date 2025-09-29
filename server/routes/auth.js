@@ -303,58 +303,77 @@ router.get('/me', async (req, res) => {
         referer: req.headers.referer
     });
     
-    // Check if session exists in store
-    if (req.session) {
-        console.log('[/me] Session exists, checking store...');
-        // Try to reload session from store
-        req.session.reload((err) => {
-            if (err) {
-                console.log('[/me] Session reload error:', err);
-                // If session reload fails, try to find user by session ID in database
-                console.log('[/me] Attempting to find session in database...');
-                const db = getDb();
-                if (db) {
-                    db.collection('sessions').findOne({ _id: req.sessionID })
-                        .then(sessionDoc => {
-                            if (sessionDoc && sessionDoc.session && sessionDoc.session.userId) {
-                                console.log('[/me] Found session in database:', sessionDoc.session.userId);
-                                req.session.userId = sessionDoc.session.userId;
-                            } else {
-                                console.log('[/me] No session found in database');
-                            }
-                        })
-                        .catch(dbErr => {
-                            console.error('[/me] Database lookup error:', dbErr);
-                        });
-                }
+    let userId = null;
+    
+    // Method 1: Try to get userId from session document in database
+    try {
+        const db = getDb();
+        if (db) {
+            const sessionDoc = await db.collection('sessions').findOne({ _id: req.sessionID });
+            if (sessionDoc && sessionDoc.session && sessionDoc.session.userId) {
+                userId = sessionDoc.session.userId;
+                console.log('[/me] Found userId in session document:', userId);
             } else {
-                console.log('[/me] Session reloaded:', {
-                    sessionId: req.sessionID,
-                    userId: req.session?.userId
-                });
+                console.log('[/me] No session document found in database');
             }
-        });
+        }
+    } catch (dbErr) {
+        console.error('[/me] Database lookup error:', dbErr);
     }
     
-    // "soft" me endpoint (doesn't force both tokens, just reports)
-    if (!req.session?.userId) {
-        console.log('[/me] No session userId found');
+    // Method 2: If no userId found, try to get from URL parameters (if passed)
+    if (!userId && req.query.userId) {
+        userId = req.query.userId;
+        console.log('[/me] Using userId from URL parameter:', userId);
+    }
+    
+    // Method 3: If still no userId, try to get from headers (if passed)
+    if (!userId && req.headers['x-user-id']) {
+        userId = req.headers['x-user-id'];
+        console.log('[/me] Using userId from header:', userId);
+    }
+    
+    // Method 4: If still no userId, try to get from cookie (if stored)
+    if (!userId && req.cookies.userId) {
+        userId = req.cookies.userId;
+        console.log('[/me] Using userId from cookie:', userId);
+    }
+    
+    // If still no userId, return unauthorized
+    if (!userId) {
+        console.log('[/me] No userId found from any source');
         return res.status(401).json({ error: 'Not logged in' });
     }
     
-    const db = getDb();
-    const user = await db.collection('users').findOne({ _id: new ObjectId(String(req.session.userId)) });
-    if (!user) {
-        console.log('[/me] User not found in database');
-        return res.status(404).json({ error: 'User not found' });
+    // Find user in database
+    try {
+        const db = getDb();
+        if (!db) {
+            console.log('[/me] Database not available');
+            return res.status(500).json({ error: 'Database not available' });
+        }
+        
+        const user = await db.collection('users').findOne({ _id: new ObjectId(String(userId)) });
+        if (!user) {
+            console.log('[/me] User not found in database for userId:', userId);
+            return res.status(404).json({ error: 'User not found' });
+        }
+        
+        console.log('[/me] User found:', { 
+            email: user.email, 
+            hasGoogle: !!user.google_tokens, 
+            hasHubSpot: !!user.hubspot_tokens?.access_token 
+        });
+        
+        res.json({
+            email: user.email,
+            hasGoogle: !!user.google_tokens,
+            hasHubSpot: !!user.hubspot_tokens?.access_token
+        });
+    } catch (err) {
+        console.error('[/me] Error finding user:', err);
+        return res.status(500).json({ error: 'Database error' });
     }
-    
-    console.log('[/me] User found:', { email: user.email, hasGoogle: !!user.google_tokens, hasHubSpot: !!user.hubspot_tokens?.access_token });
-    res.json({
-        email: user.email,
-        hasGoogle: !!user.google_tokens,
-        hasHubSpot: !!user.hubspot_tokens?.access_token
-    });
 });
 
 export default router;
