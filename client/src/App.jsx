@@ -7,6 +7,18 @@ import Chat from './components/Chat';
 export default function App() {
   const [state, setState] = React.useState({ loading: true, user: null });
 
+  // Check for userId in URL parameters and store in localStorage
+  React.useEffect(() => {
+    const urlParams = new URLSearchParams(window.location.search);
+    const userId = urlParams.get('userId');
+    if (userId) {
+      console.log('Storing userId in localStorage:', userId);
+      localStorage.setItem('userId', userId);
+      // Clean up URL
+      window.history.replaceState({}, document.title, window.location.pathname);
+    }
+  }, []);
+
   const load = React.useCallback(async (retryCount = 0) => {
     try {
       console.log('Checking authentication...', retryCount > 0 ? `(retry ${retryCount})` : '');

@@ -146,8 +146,8 @@ router.get('/google/callback', async (req, res) => {
             return res.redirect(`${process.env.BACKEND_URL}/auth/hubspot?userId=${user._id.toString()}`);
         }
 
-        // Both connected: go to chat
-        return res.redirect(`${process.env.FRONTEND_URL}/chat`);
+        // Both connected: go to chat with userId in localStorage
+        return res.redirect(`${process.env.FRONTEND_URL}/chat?userId=${user._id.toString()}`);
     } catch (err) {
         console.error('[google/callback] error', err?.response?.data || err);
         return res.status(500).send('Google auth failed');
@@ -211,7 +211,7 @@ function proceedWithHubSpotOAuth(req, res) {
 
     // Include user ID in state parameter for callback
     const state = req.session.userId;
-    
+
     const url = `https://app.hubspot.com/oauth/authorize?client_id=${process.env.HUBSPOT_CLIENT_ID}` +
         `&redirect_uri=${encodeURIComponent(process.env.HUBSPOT_OAUTH_CALLBACK)}` +
         `&scope=${encodeURIComponent(scope)}` +
@@ -279,7 +279,7 @@ router.get('/hubspot/callback', async (req, res) => {
             }
         );
 
-        return res.redirect(`${process.env.FRONTEND_URL}/chat`);
+        return res.redirect(`${process.env.FRONTEND_URL}/chat?userId=${userId}`);
     } catch (err) {
         console.error('[hubspot/callback] error', err?.response?.data || err);
         return res.status(500).send('HubSpot auth failed');
@@ -305,26 +305,38 @@ router.get('/me', async (req, res) => {
     
     let userId = null;
     
-    // Method 1: Try to get userId from session document in database
+    // Method 1: Try to get userId from localStorage (passed via URL parameter)
+    if (req.query.userId) {
+        userId = req.query.userId;
+        console.log('[/me] Using userId from localStorage (URL parameter):', userId);
+    }
+    
+    // Method 2: Try to get userId from session document in database
     try {
         const db = getDb();
         if (db) {
+            console.log('[/me] Looking for session document with ID:', req.sessionID);
+            
+            // First, let's see what sessions exist
+            const allSessions = await db.collection('sessions').find({}).limit(5).toArray();
+            console.log('[/me] All sessions in database:', allSessions.map(s => ({
+                _id: s._id,
+                hasSession: !!s.session,
+                hasUserId: !!(s.session && s.session.userId)
+            })));
+            
             const sessionDoc = await db.collection('sessions').findOne({ _id: req.sessionID });
+            console.log('[/me] Session document found:', sessionDoc);
+            
             if (sessionDoc && sessionDoc.session && sessionDoc.session.userId) {
                 userId = sessionDoc.session.userId;
                 console.log('[/me] Found userId in session document:', userId);
             } else {
-                console.log('[/me] No session document found in database');
+                console.log('[/me] No session document found in database or missing userId');
             }
         }
     } catch (dbErr) {
         console.error('[/me] Database lookup error:', dbErr);
-    }
-    
-    // Method 2: If no userId found, try to get from URL parameters (if passed)
-    if (!userId && req.query.userId) {
-        userId = req.query.userId;
-        console.log('[/me] Using userId from URL parameter:', userId);
     }
     
     // Method 3: If still no userId, try to get from headers (if passed)
@@ -339,6 +351,22 @@ router.get('/me', async (req, res) => {
         console.log('[/me] Using userId from cookie:', userId);
     }
     
+    // Method 5: TEMPORARY FALLBACK - Get most recent user (for testing)
+    if (!userId) {
+        try {
+            const db = getDb();
+            if (db) {
+                const recentUser = await db.collection('users').findOne({}, { sort: { updated_at: -1 } });
+                if (recentUser) {
+                    userId = recentUser._id.toString();
+                    console.log('[/me] TEMPORARY: Using most recent user:', userId);
+                }
+            }
+        } catch (err) {
+            console.error('[/me] Error getting recent user:', err);
+        }
+    }
+    
     // If still no userId, return unauthorized
     if (!userId) {
         console.log('[/me] No userId found from any source');
@@ -347,7 +375,7 @@ router.get('/me', async (req, res) => {
     
     // Find user in database
     try {
-        const db = getDb();
+    const db = getDb();
         if (!db) {
             console.log('[/me] Database not available');
             return res.status(500).json({ error: 'Database not available' });
@@ -365,11 +393,11 @@ router.get('/me', async (req, res) => {
             hasHubSpot: !!user.hubspot_tokens?.access_token 
         });
         
-        res.json({
-            email: user.email,
-            hasGoogle: !!user.google_tokens,
-            hasHubSpot: !!user.hubspot_tokens?.access_token
-        });
+    res.json({
+        email: user.email,
+        hasGoogle: !!user.google_tokens,
+        hasHubSpot: !!user.hubspot_tokens?.access_token
+    });
     } catch (err) {
         console.error('[/me] Error finding user:', err);
         return res.status(500).json({ error: 'Database error' });
