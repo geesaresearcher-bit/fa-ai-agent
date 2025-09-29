@@ -227,7 +227,7 @@ router.get('/hubspot/callback', async (req, res) => {
 
         const db = getDb();
         await db.collection('users').updateOne(
-            { _id: req.session.userId },
+            { _id: userId },
             {
                 $set: {
                     hubspot_tokens: {
