@@ -75,7 +75,13 @@ router.get('/google/callback', async (req, res) => {
         );
 
         // start session
-        req.session.userId = user._id;
+        req.session.userId = user._id.toString();
+        console.log('Session set:', {
+            sessionId: req.sessionID,
+            userId: req.session.userId,
+            user_id_type: typeof user._id,
+            session_userId_type: typeof req.session.userId
+        });
         console.log('[/google/callback] Session set:', {
             sessionId: req.sessionID,
             userId: user._id,
@@ -227,7 +233,7 @@ router.get('/hubspot/callback', async (req, res) => {
 
         const db = getDb();
         await db.collection('users').updateOne(
-            { _id: userId },
+            { _id: new ObjectId(userId) },
             {
                 $set: {
                     hubspot_tokens: {
