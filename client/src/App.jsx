@@ -24,6 +24,7 @@ export default function App() {
         return;
       }
       
+      console.log('Setting user to null - redirecting to login');
       setState({ loading: false, user: null });
     }
   }, []);

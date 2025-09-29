@@ -283,9 +283,18 @@ router.get('/hubspot/callback', async (req, res) => {
 
 /* ===== session helpers ===== */
 router.post('/logout', (req, res) => {
-    if (req.session) req.session.destroy(() => { });
+    console.log('[/logout] Logout request received');
+    
+    if (req.session) {
+        console.log('[/logout] Destroying session');
+        req.session.destroy(() => { });
+    }
+    
+    console.log('[/logout] Clearing cookies');
     res.clearCookie('sid');
     res.clearCookie('auth_token');
+    
+    console.log('[/logout] Logout successful');
     res.json({ ok: true });
 });
 

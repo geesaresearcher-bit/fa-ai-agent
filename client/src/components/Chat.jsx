@@ -65,8 +65,14 @@ export default function Chat({ me, onAuthChanged }) {
   }
 
   async function onLogout() {
+    console.log('Logout initiated...');
     localStorage.clear();
-    await logout();
+    try {
+      await logout();
+      console.log('Logout API call successful');
+    } catch (error) {
+      console.log('Logout API call failed:', error);
+    }
     onAuthChanged(); // This will trigger a re-check of auth status
   }
 
