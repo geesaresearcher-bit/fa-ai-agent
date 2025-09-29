@@ -291,8 +291,18 @@ router.post('/logout', (req, res) => {
     }
     
     console.log('[/logout] Clearing cookies');
-    res.clearCookie('sid');
-    res.clearCookie('auth_token');
+    res.clearCookie('sid', {
+        httpOnly: true,
+        sameSite: 'none',
+        secure: process.env.NODE_ENV === 'production',
+        path: '/'
+    });
+    res.clearCookie('auth_token', {
+        httpOnly: true,
+        sameSite: 'none',
+        secure: process.env.NODE_ENV === 'production',
+        path: '/'
+    });
     
     console.log('[/logout] Logout successful');
     res.json({ ok: true });
