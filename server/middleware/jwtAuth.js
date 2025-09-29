@@ -32,6 +32,13 @@ export function jwtAuth(req, res, next) {
 
 export async function jwtAuthWithUser(req, res, next) {
     try {
+        console.log('[jwtAuthWithUser] Request received:', {
+            path: req.path,
+            cookies: req.cookies,
+            authToken: req.cookies.auth_token,
+            cookieHeader: req.headers.cookie
+        });
+        
         // Get JWT token from cookie
         const token = req.cookies.auth_token;
         if (!token) {
@@ -41,10 +48,11 @@ export async function jwtAuthWithUser(req, res, next) {
         
         // Verify JWT token
         const jwtSecret = process.env.JWT_SECRET || 'dev_jwt_secret';
+        console.log('[jwtAuthWithUser] JWT secret:', jwtSecret ? 'present' : 'missing');
         const decoded = jwt.verify(token, jwtSecret);
         const userId = decoded.userId;
         
-        console.log('[jwtAuthWithUser] JWT token verified, userId:', userId);
+        console.log('[jwtAuthWithUser] JWT token verified, userId:', userId, 'type:', typeof userId);
         
         // Find user in database
         const db = getDb();
@@ -53,9 +61,18 @@ export async function jwtAuthWithUser(req, res, next) {
             return res.status(500).json({ error: 'Database not available' });
         }
         
+        console.log('[jwtAuthWithUser] Looking for user with ObjectId:', new ObjectId(String(userId)));
         const user = await db.collection('users').findOne({ _id: new ObjectId(String(userId)) });
+        console.log('[jwtAuthWithUser] User found:', user ? 'yes' : 'no');
+        
         if (!user) {
             console.log('[jwtAuthWithUser] User not found in database for userId:', userId);
+            // Let's check what users exist
+            const allUsers = await db.collection('users').find({}).limit(3).toArray();
+            console.log('[jwtAuthWithUser] All users in database:', allUsers.map(u => ({
+                _id: u._id.toString(),
+                email: u.email
+            })));
             return res.status(404).json({ error: 'User not found' });
         }
         

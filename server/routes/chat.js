@@ -380,11 +380,36 @@ const tools = [
 
 router.post('/message', async (req, res) => {
     try {
+        console.log('[chat/message] Request received:', {
+            userId: req.userId,
+            userEmail: req.userEmail,
+            user: req.user,
+            cookies: req.headers.cookie
+        });
+        
         const userId = req.userId; // set by middleware
+        if (!userId) {
+            console.log('[chat/message] No userId found in request');
+            return res.status(401).json({ error: 'Not authenticated' });
+        }
+        
         const { message, threadId } = req.body;
         const db = getDb();
-        const user = await db.collection('users').findOne({ _id: userId });
-        if (!user) return res.status(401).json({ error: 'Invalid user' });
+        
+        console.log('[chat/message] Looking for user with userId:', userId, 'type:', typeof userId);
+        
+        const user = await db.collection('users').findOne({ _id: new ObjectId(String(userId)) });
+        console.log('[chat/message] User found:', user ? 'yes' : 'no');
+        
+        if (!user) {
+            console.log('[chat/message] User not found, checking all users...');
+            const allUsers = await db.collection('users').find({}).limit(5).toArray();
+            console.log('[chat/message] All users in database:', allUsers.map(u => ({
+                _id: u._id.toString(),
+                email: u.email
+            })));
+            return res.status(401).json({ error: 'Invalid user' });
+        }
 
         // 0) Ensure conversation
         const conversation = await ensureConversation(userId, threadId);
