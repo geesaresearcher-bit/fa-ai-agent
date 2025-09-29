@@ -104,16 +104,8 @@ router.get('/google/callback', async (req, res) => {
         if (!user.hubspot_tokens?.access_token) {
             console.log('HubSpot not connected, redirecting to connect it', `${process.env.BACKEND_URL}/auth/hubspot`);
             
-            // Ensure session is saved before redirect
-            req.session.save((err) => {
-                if (err) {
-                    console.error('Session save error before HubSpot redirect:', err);
-                } else {
-                    console.log('Session saved before HubSpot redirect');
-                }
-            });
-            
-            return res.redirect(`${process.env.BACKEND_URL}/auth/hubspot`);
+            // Pass user ID directly in URL to avoid session issues
+            return res.redirect(`${process.env.BACKEND_URL}/auth/hubspot?userId=${user._id.toString()}`);
         }
 
         // Both connected: go to chat
@@ -129,51 +121,28 @@ router.get('/hubspot', (req, res) => {
     console.log('HubSpot OAuth check:', {
         sessionId: req.sessionID,
         userId: req.session?.userId,
-        cookies: req.headers.cookie,
-        session: req.session
+        urlUserId: req.query.userId,
+        cookies: req.headers.cookie
     });
     
-    // Try to reload session from store
-    if (req.session) {
-        req.session.reload((err) => {
-            if (err) {
-                console.log('Session reload error:', err);
-            } else {
-                console.log('Session reloaded:', {
-                    sessionId: req.sessionID,
-                    userId: req.session?.userId
-                });
-            }
-        });
+    let userId = null;
+    
+    // Check for user ID in URL parameter first (most reliable)
+    if (req.query.userId) {
+        userId = req.query.userId;
+        console.log('Using userId from URL parameter:', userId);
+        // Set in session for consistency
+        req.session.userId = userId;
+    }
+    // Fallback to session if no URL parameter
+    else if (req.session?.userId) {
+        userId = req.session.userId;
+        console.log('Using userId from session:', userId);
     }
     
-    if (!req.session?.userId) {
-        console.log('No session found, trying direct database lookup...');
-        
-        // Try to find session in database directly
-        const db = getDb();
-        if (db) {
-            db.collection('sessions').findOne({ _id: req.sessionID })
-                .then(sessionDoc => {
-                    if (sessionDoc && sessionDoc.session && sessionDoc.session.userId) {
-                        console.log('Found session in database:', sessionDoc.session.userId);
-                        req.session.userId = sessionDoc.session.userId;
-                        // Continue with HubSpot OAuth
-                        proceedWithHubSpotOAuth(req, res);
-                    } else {
-                        console.log('No session found in database, redirecting to Google OAuth');
-                        return res.redirect(`${process.env.BACKEND_URL}/auth/google`);
-                    }
-                })
-                .catch(dbErr => {
-                    console.error('Database lookup error:', dbErr);
-                    return res.redirect(`${process.env.BACKEND_URL}/auth/google`);
-                });
-        } else {
-            console.log('Database not available, redirecting to Google OAuth');
-            return res.redirect(`${process.env.BACKEND_URL}/auth/google`);
-        }
-        return; // Don't continue with the rest of the function
+    if (!userId) {
+        console.log('No userId found, redirecting to Google OAuth');
+        return res.redirect(`${process.env.BACKEND_URL}/auth/google`);
     }
     
     proceedWithHubSpotOAuth(req, res);
@@ -202,10 +171,14 @@ function proceedWithHubSpotOAuth(req, res) {
         'sales-email-read'
     ].join(' ');
 
+    // Include user ID in state parameter for callback
+    const state = req.session.userId;
+    
     const url = `https://app.hubspot.com/oauth/authorize?client_id=${process.env.HUBSPOT_CLIENT_ID}` +
         `&redirect_uri=${encodeURIComponent(process.env.HUBSPOT_OAUTH_CALLBACK)}` +
         `&scope=${encodeURIComponent(scope)}` +
-        `&response_type=code`;
+        `&response_type=code` +
+        `&state=${state}`;
     
     console.log('HubSpot OAuth URL:', url);
     res.redirect(url);
@@ -216,12 +189,21 @@ router.get('/hubspot/callback', async (req, res) => {
         console.log('HubSpot OAuth callback received:', {
             sessionId: req.sessionID,
             userId: req.session?.userId,
+            state: req.query.state,
             code: req.query.code ? 'present' : 'missing',
             error: req.query.error,
             query: req.query
         });
         
-        if (!req.session?.userId) return res.status(401).send('Session missing. Login with Google first.');
+        // Get user ID from state parameter or session
+        let userId = req.session?.userId;
+        if (!userId && req.query.state) {
+            userId = req.query.state;
+            req.session.userId = userId;
+            console.log('Using userId from state parameter:', userId);
+        }
+        
+        if (!userId) return res.status(401).send('Session missing. Login with Google first.');
         const code = req.query.code;
         if (!code) return res.status(400).send('Missing code');
 
