@@ -22,6 +22,21 @@ router.get('/google', (req, res) => {
         hasClientSecret: !!process.env.GOOGLE_CLIENT_SECRET
     });
     
+    // Clear any existing authentication when starting new Google OAuth
+    console.log('Clearing existing authentication for new Google OAuth');
+    res.clearCookie('sid', {
+        httpOnly: true,
+        sameSite: 'none',
+        secure: process.env.NODE_ENV === 'production',
+        path: '/'
+    });
+    res.clearCookie('auth_token', {
+        httpOnly: true,
+        sameSite: 'none',
+        secure: process.env.NODE_ENV === 'production',
+        path: '/'
+    });
+    
     const url = googleClient.generateAuthUrl({
         access_type: 'offline',
         scope: [
@@ -150,7 +165,7 @@ router.get('/google/callback', async (req, res) => {
 });
 
 /* ===== HubSpot OAuth ===== */
-router.get('/hubspot', (req, res) => {
+router.get('/hubspot', async (req, res) => {
     console.log('HubSpot OAuth check:', {
         sessionId: req.sessionID,
         userId: req.session?.userId,
@@ -160,17 +175,24 @@ router.get('/hubspot', (req, res) => {
     
     let userId = null;
     
-    // Check for user ID in URL parameter first (most reliable)
+    // Method 1: Check for user ID in URL parameter first (most reliable)
     if (req.query.userId) {
         userId = req.query.userId;
         console.log('Using userId from URL parameter:', userId);
-        // Set in session for consistency
-        req.session.userId = userId;
     }
-    // Fallback to session if no URL parameter
-    else if (req.session?.userId) {
-        userId = req.session.userId;
-        console.log('Using userId from session:', userId);
+    // Method 2: Try to get userId from JWT token
+    else {
+        try {
+            const token = req.cookies.auth_token;
+            if (token) {
+                const jwtSecret = process.env.JWT_SECRET || 'dev_jwt_secret';
+                const decoded = jwt.verify(token, jwtSecret);
+                userId = decoded.userId;
+                console.log('Using userId from JWT token:', userId);
+            }
+        } catch (err) {
+            console.log('JWT token verification failed:', err.message);
+        }
     }
     
     if (!userId) {
@@ -178,11 +200,11 @@ router.get('/hubspot', (req, res) => {
         return res.redirect(`${process.env.BACKEND_URL}/auth/google`);
     }
     
-    proceedWithHubSpotOAuth(req, res);
+    proceedWithHubSpotOAuth(req, res, userId);
 });
 
-function proceedWithHubSpotOAuth(req, res) {
-    console.log('Proceeding with HubSpot OAuth for user:', req.session?.userId);
+function proceedWithHubSpotOAuth(req, res, userId) {
+    console.log('Proceeding with HubSpot OAuth for user:', userId);
     
     // Ensure session cookie is set for this request
     res.cookie('sid', req.sessionID, {
@@ -205,7 +227,7 @@ function proceedWithHubSpotOAuth(req, res) {
     ].join(' ');
 
     // Include user ID in state parameter for callback
-    const state = req.session.userId;
+    const state = userId;
 
     const url = `https://app.hubspot.com/oauth/authorize?client_id=${process.env.HUBSPOT_CLIENT_ID}` +
         `&redirect_uri=${encodeURIComponent(process.env.HUBSPOT_OAUTH_CALLBACK)}` +
