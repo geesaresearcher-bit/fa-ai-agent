@@ -7,6 +7,25 @@ import {
     checkHubspotContactCreatedTool,
     proactiveAgentTool 
 } from './lib/tools.js';
+import { refreshHubSpotIfNeeded } from './lib/oauthRefresh.js';
+
+// Check and refresh Hubspot token if needed
+async function ensureHubspotConnected(user) {
+    if (!user.hubspot_tokens || !user.hubspot_tokens.access_token) {
+        console.log(`[worker] Hubspot not connected for user ${user._id}`);
+        return false;
+    }
+
+    try {
+        // This function automatically checks if token is expired and refreshes if needed
+        const refreshedTokens = await refreshHubSpotIfNeeded(user);
+        console.log(`[worker] Hubspot token is valid for user ${user._id}`);
+        return true;
+    } catch (error) {
+        console.log(`[worker] Hubspot token refresh failed for user ${user._id}: ${error.message}`);
+        return false;
+    }
+}
 
 async function loop() {
     try {
@@ -47,6 +66,13 @@ async function loop() {
 
 async function processProactiveEvents(user) {
     const db = getDb();
+    
+    // Ensure Hubspot is connected and token is fresh
+    const hubspotConnected = await ensureHubspotConnected(user);
+    if (!hubspotConnected) {
+        console.log(`[proactive] Skipping email processing for user ${user._id} - Hubspot not connected or token refresh failed`);
+        return;
+    }
     
     // Check for new emails from unknown senders
     try {
@@ -92,6 +118,11 @@ async function processProactiveEvents(user) {
                 );
             } else {
                 console.log(`[proactive] Error processing email: ${result.error}`);
+                // Mark as processed to avoid retrying failed emails
+                await db.collection('emails').updateOne(
+                    { _id: email._id },
+                    { $set: { processed_for_proactive: true } }
+                );
             }
         }
     } catch (e) {
@@ -126,6 +157,13 @@ async function processProactiveEvents(user) {
                     { _id: event._id },
                     { $set: { processed_for_proactive: true } }
                 );
+            } else {
+                console.log(`[proactive] Error processing calendar event: ${result.error}`);
+                // Mark as processed to avoid retrying failed events
+                await db.collection('calendar_events').updateOne(
+                    { _id: event._id },
+                    { $set: { processed_for_proactive: true } }
+                );
             }
         }
     } catch (e) {
@@ -155,6 +193,13 @@ async function processProactiveEvents(user) {
             if (result.ok) {
                 console.log(`[proactive] HubSpot contact created: ${contact.email}`);
                 // Mark as processed
+                await db.collection('hubspot_contacts').updateOne(
+                    { _id: contact._id },
+                    { $set: { processed_for_proactive: true } }
+                );
+            } else {
+                console.log(`[proactive] Error processing HubSpot contact: ${result.error}`);
+                // Mark as processed to avoid retrying failed contacts
                 await db.collection('hubspot_contacts').updateOne(
                     { _id: contact._id },
                     { $set: { processed_for_proactive: true } }
