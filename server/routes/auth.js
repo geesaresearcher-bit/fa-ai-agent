@@ -284,4 +284,102 @@ router.get('/me', async (req, res) => {
     }
 });
 
+/* ===== Disconnect endpoints ===== */
+router.post('/disconnect/google', async (req, res) => {
+    try {
+        // Get JWT token from cookie
+        const token = req.cookies.auth_token;
+        if (!token) {
+            return res.status(401).json({ error: 'Not logged in' });
+        }
+        
+        // Verify JWT token
+        const jwtSecret = process.env.JWT_SECRET || 'dev_jwt_secret';
+        const decoded = jwt.verify(token, jwtSecret);
+        const userId = decoded.userId;
+        
+        // Remove Google tokens from database
+        const db = getDb();
+        await db.collection('users').updateOne(
+            { _id: new ObjectId(String(userId)) },
+            { 
+                $unset: { google_tokens: 1 },
+                $set: { updated_at: new Date() }
+            }
+        );
+        
+        res.json({ success: true, message: 'Google disconnected successfully' });
+    } catch (err) {
+        console.error('[/disconnect/google] error:', err);
+        return res.status(500).json({ error: 'Failed to disconnect Google' });
+    }
+});
+
+router.post('/disconnect/hubspot', async (req, res) => {
+    try {
+        // Get JWT token from cookie
+        const token = req.cookies.auth_token;
+        if (!token) {
+            return res.status(401).json({ error: 'Not logged in' });
+        }
+        
+        // Verify JWT token
+        const jwtSecret = process.env.JWT_SECRET || 'dev_jwt_secret';
+        const decoded = jwt.verify(token, jwtSecret);
+        const userId = decoded.userId;
+        
+        // Remove Hubspot tokens from database
+        const db = getDb();
+        await db.collection('users').updateOne(
+            { _id: new ObjectId(String(userId)) },
+            { 
+                $unset: { hubspot_tokens: 1 },
+                $set: { updated_at: new Date() }
+            }
+        );
+        
+        res.json({ success: true, message: 'Hubspot disconnected successfully' });
+    } catch (err) {
+        console.error('[/disconnect/hubspot] error:', err);
+        return res.status(500).json({ error: 'Failed to disconnect Hubspot' });
+    }
+});
+
+/* ===== Integrations status endpoint ===== */
+router.get('/integrations', async (req, res) => {
+    try {
+        // Get JWT token from cookie
+        const token = req.cookies.auth_token;
+        if (!token) {
+            return res.status(401).json({ error: 'Not logged in' });
+        }
+        
+        // Verify JWT token
+        const jwtSecret = process.env.JWT_SECRET || 'dev_jwt_secret';
+        const decoded = jwt.verify(token, jwtSecret);
+        const userId = decoded.userId;
+        
+        // Find user in database
+        const db = getDb();
+        const user = await db.collection('users').findOne({ _id: new ObjectId(String(userId)) });
+        if (!user) {
+            return res.status(404).json({ error: 'User not found' });
+        }
+        
+        res.json({
+            google: {
+                connected: !!user.google_tokens?.access_token,
+                email: user.email
+            },
+            hubspot: {
+                connected: !!user.hubspot_tokens?.access_token,
+                email: user.email
+            }
+        });
+    } catch (err) {
+        console.error('[/integrations] error:', err);
+        return res.status(500).json({ error: 'Failed to get integrations status' });
+    }
+});
+
 export default router;

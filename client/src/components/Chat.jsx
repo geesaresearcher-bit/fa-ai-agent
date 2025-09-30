@@ -1,6 +1,7 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import Sidebar from '../components/Sidebar.jsx';
+import Settings from '../components/Settings.jsx';
 import { whoAmI, sendMessage, getConversationMessages, logout } from '../api';
 
 export default function Chat({ me, onAuthChanged }) {
@@ -11,6 +12,7 @@ export default function Chat({ me, onAuthChanged }) {
   const [sending, setSending] = React.useState(false);
   const [loading, setLoading] = React.useState(false);
   const [activeTab, setActiveTab] = React.useState('chat');
+  const [showSettings, setShowSettings] = React.useState(false);
   const isDesktop = useMedia('(min-width: 1024px)');
 
   const endRef = React.useRef(null);
@@ -96,7 +98,10 @@ export default function Chat({ me, onAuthChanged }) {
             <strong>Financial Advisor AI Agent</strong>
             <div className="subheader">{me.email} {me.hasHubSpot ? '• HubSpot Connected' : '• Connecting HubSpot…'}</div>
           </div>
-          <button onClick={onLogout} className="btn-outline">Logout</button>
+          <div style={{ display: 'flex', gap: '8px' }}>
+            <button onClick={() => setShowSettings(true)} className="btn-outline">Settings</button>
+            <button onClick={onLogout} className="btn-outline">Logout</button>
+          </div>
         </header>
 
         <div className="tabbar">
@@ -154,6 +159,8 @@ export default function Chat({ me, onAuthChanged }) {
           <Sidebar mobile activeId={threadId} onSelect={onSelectConversation} onNew={id => onSelectConversation(id)} />
         )}
       </div>
+      
+      {showSettings && <Settings onClose={() => setShowSettings(false)} />}
     </div>
   );
 }
