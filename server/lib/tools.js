@@ -639,11 +639,23 @@ Determine which instructions should be triggered and what actions to take. Respo
 
 export async function checkEmailFromUnknownTool(userId, { emailContent, senderEmail, subject }) {
     try {
+        console.log(`[checkEmailFromUnknownTool] Processing email from: ${senderEmail}`);
         const db = getDb();
 
         // Check if sender exists in HubSpot
         const hubspotCheck = await findHubspotContactTool(userId, { query: senderEmail });
-        const isKnownContact = hubspotCheck.ok && hubspotCheck.results?.length > 0;
+        
+        if (!hubspotCheck.ok) {
+            console.log(`[checkEmailFromUnknownTool] Hubspot check failed: ${hubspotCheck.error}`);
+            return {
+                ok: false,
+                error: `Hubspot connection failed: ${hubspotCheck.error}`,
+                isUnknownSender: false
+            };
+        }
+        
+        const isKnownContact = hubspotCheck.results?.length > 0;
+        console.log(`[checkEmailFromUnknownTool] Is known contact: ${isKnownContact}`);
 
         if (!isKnownContact) {
             // This is an unknown sender - create contact and send welcome email
