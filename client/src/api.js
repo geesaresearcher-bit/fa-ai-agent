@@ -86,3 +86,39 @@ export async function deleteConversation(id) {
   if (!res.ok) throw new Error('unauthorized');
   return res.json();
 }
+
+// Integration management functions
+export async function getIntegrations() {
+  const res = await fetch(`${BASE}/auth/integrations`, {
+    method: 'GET',
+    credentials: 'include'
+  });
+  if (!res.ok) throw new Error('unauthorized');
+  return res.json();
+}
+
+export async function disconnectGoogle() {
+  const res = await fetch(`${BASE}/auth/disconnect/google`, {
+    method: 'POST',
+    credentials: 'include'
+  });
+  if (!res.ok) throw new Error('failed_to_disconnect');
+  return res.json();
+}
+
+export async function disconnectHubspot() {
+  const res = await fetch(`${BASE}/auth/disconnect/hubspot`, {
+    method: 'POST',
+    credentials: 'include'
+  });
+  if (!res.ok) throw new Error('failed_to_disconnect');
+  return res.json();
+}
+
+export function getGoogleConnectUrl() {
+  return `${BASE}/auth/google`;
+}
+
+export function getHubspotConnectUrl() {
+  return `${BASE}/auth/hubspot`;
+}

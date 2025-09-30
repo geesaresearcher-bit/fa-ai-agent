@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { getIntegrations, disconnectGoogle, disconnectHubspot, getGoogleConnectUrl, getHubspotConnectUrl } from '../api';
 
 export default function Settings({ onClose }) {
   const [integrations, setIntegrations] = useState({
@@ -14,13 +15,8 @@ export default function Settings({ onClose }) {
   const loadIntegrations = async () => {
     try {
       setLoading(true);
-      const response = await fetch('/api/integrations', {
-        credentials: 'include'
-      });
-      if (response.ok) {
-        const data = await response.json();
-        setIntegrations(data);
-      }
+      const data = await getIntegrations();
+      setIntegrations(data);
     } catch (error) {
       console.error('Error loading integrations:', error);
     } finally {
@@ -28,46 +24,30 @@ export default function Settings({ onClose }) {
     }
   };
 
-  const disconnectGoogle = async () => {
+  const handleDisconnectGoogle = async () => {
     if (!window.confirm('Are you sure you want to disconnect Google? This will stop email and calendar access.')) {
       return;
     }
 
     try {
-      const response = await fetch('/api/auth/disconnect/google', {
-        method: 'POST',
-        credentials: 'include'
-      });
-      
-      if (response.ok) {
-        await loadIntegrations();
-        alert('Google disconnected successfully');
-      } else {
-        alert('Failed to disconnect Google');
-      }
+      await disconnectGoogle();
+      await loadIntegrations();
+      alert('Google disconnected successfully');
     } catch (error) {
       console.error('Error disconnecting Google:', error);
       alert('Error disconnecting Google');
     }
   };
 
-  const disconnectHubspot = async () => {
+  const handleDisconnectHubspot = async () => {
     if (!window.confirm('Are you sure you want to disconnect Hubspot? This will stop contact management.')) {
       return;
     }
 
     try {
-      const response = await fetch('/api/auth/disconnect/hubspot', {
-        method: 'POST',
-        credentials: 'include'
-      });
-      
-      if (response.ok) {
-        await loadIntegrations();
-        alert('Hubspot disconnected successfully');
-      } else {
-        alert('Failed to disconnect Hubspot');
-      }
+      await disconnectHubspot();
+      await loadIntegrations();
+      alert('Hubspot disconnected successfully');
     } catch (error) {
       console.error('Error disconnecting Hubspot:', error);
       alert('Error disconnecting Hubspot');
@@ -75,11 +55,11 @@ export default function Settings({ onClose }) {
   };
 
   const reconnectGoogle = () => {
-    window.location.href = '/api/auth/google';
+    window.location.href = getGoogleConnectUrl();
   };
 
   const reconnectHubspot = () => {
-    window.location.href = '/api/auth/hubspot';
+    window.location.href = getHubspotConnectUrl();
   };
 
   if (loading) {
@@ -124,7 +104,7 @@ export default function Settings({ onClose }) {
               </div>
               <div style={styles.integrationActions}>
                 {integrations.google.connected ? (
-                  <button onClick={disconnectGoogle} style={styles.disconnectBtn}>
+                  <button onClick={handleDisconnectGoogle} style={styles.disconnectBtn}>
                     Disconnect
                   </button>
                 ) : (
@@ -150,7 +130,7 @@ export default function Settings({ onClose }) {
               </div>
               <div style={styles.integrationActions}>
                 {integrations.hubspot.connected ? (
-                  <button onClick={disconnectHubspot} style={styles.disconnectBtn}>
+                  <button onClick={handleDisconnectHubspot} style={styles.disconnectBtn}>
                     Disconnect
                   </button>
                 ) : (
