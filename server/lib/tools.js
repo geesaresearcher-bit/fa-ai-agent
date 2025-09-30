@@ -693,6 +693,12 @@ Your Financial Advisor`
                     contactId: createContact.contactId,
                     actions: ['contact_created', 'welcome_email_sent', 'note_added']
                 };
+            } else {
+                return {
+                    ok: false,
+                    error: `Failed to create contact: ${createContact.error}`,
+                    isUnknownSender: true
+                };
             }
         }
 

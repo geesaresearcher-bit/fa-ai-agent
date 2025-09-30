@@ -104,4 +104,69 @@ router.get('/health', async (req, res) => {
     }
 });
 
+// Manual trigger for unknown emailer processing
+router.post('/trigger-unknown-emailer', async (req, res) => {
+    try {
+        const userId = req.userId;
+        const db = getDb();
+        
+        console.log('🧪 Manually triggering unknown emailer processing...');
+        
+        // Get recent emails
+        const recentEmails = await db.collection('emails')
+            .find({ 
+                user_id: new ObjectId(String(userId)), 
+                processed_for_proactive: { $ne: true },
+                created_at: { $gte: new Date(Date.now() - 24 * 60 * 60 * 1000) }
+            })
+            .sort({ created_at: -1 })
+            .limit(10)
+            .toArray();
+        
+        console.log(`Found ${recentEmails.length} recent emails to process`);
+        
+        const results = [];
+        
+        for (const email of recentEmails) {
+            console.log(`Processing email from: ${email.from}`);
+            
+            const { checkEmailFromUnknownTool } = await import('../lib/tools.js');
+            const result = await checkEmailFromUnknownTool(userId, {
+                emailContent: email.content,
+                senderEmail: email.from,
+                subject: email.subject
+            });
+            
+            results.push({
+                email: email.from,
+                subject: email.subject,
+                result: result
+            });
+            
+            if (result.ok && result.isUnknownSender) {
+                // Mark as processed
+                await db.collection('emails').updateOne(
+                    { _id: email._id },
+                    { $set: { processed_for_proactive: true } }
+                );
+                console.log(`✅ Processed unknown sender: ${email.from}`);
+            }
+        }
+        
+        res.json({
+            success: true,
+            processed: results.length,
+            results: results
+        });
+        
+    } catch (error) {
+        console.error('Error triggering unknown emailer processing:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Failed to trigger unknown emailer processing',
+            message: error.message
+        });
+    }
+});
+
 export default router;

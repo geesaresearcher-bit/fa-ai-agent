@@ -50,6 +50,8 @@ async function processProactiveEvents(user) {
     
     // Check for new emails from unknown senders
     try {
+        console.log(`[proactive] Processing emails for user: ${user._id}`);
+        
         const recentEmails = await db.collection('emails')
             .find({ 
                 user_id: user._id, 
@@ -60,12 +62,18 @@ async function processProactiveEvents(user) {
             .limit(10)
             .toArray();
 
+        console.log(`[proactive] Found ${recentEmails.length} recent emails to process`);
+
         for (const email of recentEmails) {
+            console.log(`[proactive] Processing email from: ${email.from}, subject: ${email.subject}`);
+            
             const result = await checkEmailFromUnknownTool(user._id, {
                 emailContent: email.content,
                 senderEmail: email.from,
                 subject: email.subject
             });
+
+            console.log(`[proactive] Result:`, result);
 
             if (result.ok && result.isUnknownSender) {
                 console.log(`[proactive] Unknown sender detected: ${email.from}`);
@@ -74,6 +82,16 @@ async function processProactiveEvents(user) {
                     { _id: email._id },
                     { $set: { processed_for_proactive: true } }
                 );
+                console.log(`[proactive] Email marked as processed: ${email._id}`);
+            } else if (result.ok && !result.isUnknownSender) {
+                console.log(`[proactive] Sender is known contact: ${email.from}`);
+                // Mark as processed even if known
+                await db.collection('emails').updateOne(
+                    { _id: email._id },
+                    { $set: { processed_for_proactive: true } }
+                );
+            } else {
+                console.log(`[proactive] Error processing email: ${result.error}`);
             }
         }
     } catch (e) {
