@@ -72,6 +72,26 @@ export async function scheduleEventTool(
             eventId: created.id
         });
 
+        // Store event for proactive processing
+        const db = getDb();
+        await db.collection('calendar_events').updateOne(
+            { user_id: new ObjectId(String(userId)), event_id: created.id },
+            { 
+                $set: { 
+                    title: title,
+                    attendees: attendees.map(a => a.email),
+                    start_time: start,
+                    end_time: end,
+                    description: description,
+                    html_link: created.htmlLink || fetched.data?.htmlLink,
+                    processed_for_proactive: false,
+                    updated_at: new Date() 
+                }, 
+                $setOnInsert: { created_at: new Date() } 
+            },
+            { upsert: true }
+        );
+
         return {
             ok: true,
             eventId: created.id,
@@ -422,11 +442,21 @@ export async function ensureHubspotContactTool(userId, { email, firstname = '', 
         // cache minimal record
         await db.collection('hubspot_contacts').updateOne(
             { user_id: new ObjectId(String(userId)), hubspot_id: resp.data.id },
-            { $set: { properties: resp.data.properties, updated_at: new Date() }, $setOnInsert: { created_at: new Date() } },
+            { 
+                $set: { 
+                    properties: resp.data.properties, 
+                    email: resp.data.properties.email,
+                    firstname: resp.data.properties.firstname,
+                    lastname: resp.data.properties.lastname,
+                    processed_for_proactive: false,
+                    updated_at: new Date() 
+                }, 
+                $setOnInsert: { created_at: new Date() } 
+            },
             { upsert: true }
         );
 
-        return { ok: true, created: true, contactId: resp.data.id };
+        return { ok: true, created: true, contactId: resp.data.id, email: resp.data.properties.email, firstname: resp.data.properties.firstname, lastname: resp.data.properties.lastname };
     } catch (err) {
         const herr = err?.response?.data || err?.message || String(err);
         return { ok: false, error: herr };
@@ -616,29 +646,60 @@ export async function checkEmailFromUnknownTool(userId, { emailContent, senderEm
         const isKnownContact = hubspotCheck.ok && hubspotCheck.results?.length > 0;
 
         if (!isKnownContact) {
-            // This is an unknown sender - trigger proactive actions
-            const proactiveResult = await proactiveAgentTool(userId, {
-                eventType: 'email_from_unknown',
-                eventData: { senderEmail, subject, emailContent },
-                context: 'New email from unknown sender'
+            // This is an unknown sender - create contact and send welcome email
+            const nameMatch = emailContent.match(/From:\s*(.+?)\s*</i) || 
+                            emailContent.match(/Dear\s+(.+?)[,\n]/i) ||
+                            [null, 'New Client'];
+            const clientName = nameMatch[1] || 'New Client';
+            const nameParts = clientName.split(' ');
+            const firstName = nameParts[0] || '';
+            const lastName = nameParts.slice(1).join(' ') || '';
+
+            // Create HubSpot contact
+            const createContact = await ensureHubspotContactTool(userId, {
+                email: senderEmail,
+                firstname: firstName,
+                lastname: lastName
             });
 
-            return {
-                ok: true,
-                isUnknownSender: true,
-                proactiveResult,
-                recommendedActions: [
-                    'create_hubspot_contact',
-                    'send_welcome_email',
-                    'add_contact_note'
-                ]
-            };
+            if (createContact.ok) {
+                // Add note about the email
+                if (createContact.contactId) {
+                    await updateHubspotContactTool(userId, {
+                        contactId: createContact.contactId,
+                        note: `Email received: ${subject}\nContent: ${emailContent.substring(0, 500)}...`
+                    });
+                }
+
+                // Send welcome email
+                const welcomeEmail = await sendEmailTool(userId, {
+                    to: senderEmail,
+                    subject: 'Thank you for reaching out',
+                    body: `Hi ${firstName},
+
+Thank you for reaching out to me. I've received your email and will get back to you soon.
+
+I've added you to my client database and look forward to working with you.
+
+Best regards,
+Your Financial Advisor`
+                });
+
+                return {
+                    ok: true,
+                    isUnknownSender: true,
+                    contactCreated: createContact.ok,
+                    welcomeEmailSent: welcomeEmail.ok,
+                    contactId: createContact.contactId,
+                    actions: ['contact_created', 'welcome_email_sent', 'note_added']
+                };
+            }
         }
 
         return {
             ok: true,
             isUnknownSender: false,
-            existingContact: hubspotCheck.results[0]
+            existingContact: hubspotCheck.results?.[0]
         };
     } catch (err) {
         return { ok: false, error: err.message };
@@ -685,6 +746,70 @@ export async function checkHubspotContactCreatedTool(userId, { contactId, email,
                 'create_follow_up_task',
                 'add_contact_notes'
             ]
+        };
+    } catch (err) {
+        return { ok: false, error: err.message };
+    }
+}
+
+export async function lookupMeetingWithClientTool(userId, { clientName, clientEmail }) {
+    try {
+        const db = getDb();
+        const user = await db.collection('users').findOne({ _id: new ObjectId(String(userId)) });
+        if (!user?.google_tokens) return { ok: false, error: 'Google not connected' };
+
+        // Set up Google authentication
+        const auth = new google.auth.OAuth2(
+            process.env.GOOGLE_CLIENT_ID,
+            process.env.GOOGLE_CLIENT_SECRET,
+            process.env.GOOGLE_OAUTH_CALLBACK
+        );
+        auth.setCredentials(user.google_tokens);
+        const calendar = google.calendar({ version: 'v3', auth });
+
+        // Get upcoming events
+        const now = new Date();
+        const nextWeek = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
+
+        const events = await calendar.events.list({
+            calendarId: 'primary',
+            timeMin: now.toISOString(),
+            timeMax: nextWeek.toISOString(),
+            singleEvents: true,
+            orderBy: 'startTime'
+        });
+
+        // Filter events that include the client
+        const clientEvents = events.data.items?.filter(event => {
+            const attendees = event.attendees || [];
+            const summary = event.summary || '';
+            const description = event.description || '';
+            
+            // Check if client name or email appears in attendees, summary, or description
+            const hasClientInAttendees = attendees.some(attendee => 
+                attendee.email === clientEmail || 
+                (attendee.displayName && attendee.displayName.toLowerCase().includes(clientName.toLowerCase()))
+            );
+            
+            const hasClientInText = summary.toLowerCase().includes(clientName.toLowerCase()) ||
+                                  description.toLowerCase().includes(clientName.toLowerCase());
+            
+            return hasClientInAttendees || hasClientInText;
+        }) || [];
+
+        return {
+            ok: true,
+            clientName,
+            clientEmail,
+            upcomingMeetings: clientEvents.map(event => ({
+                id: event.id,
+                title: event.summary,
+                start: event.start?.dateTime || event.start?.date,
+                end: event.end?.dateTime || event.end?.date,
+                attendees: event.attendees?.map(a => ({ email: a.email, name: a.displayName })) || [],
+                description: event.description,
+                htmlLink: event.htmlLink
+            }))
         };
     } catch (err) {
         return { ok: false, error: err.message };

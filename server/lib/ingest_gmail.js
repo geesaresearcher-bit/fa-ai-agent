@@ -34,5 +34,30 @@ export async function ingestEmailsForUser(user) {
             { $set: { content: snippet, metadata: full.data, embedding: vector, updated_at: new Date() }, $setOnInsert: { created_at: new Date() } },
             { upsert: true }
         );
+
+        // Also store in emails collection for proactive processing
+        const headers = full.data.payload?.headers || [];
+        const fromHeader = headers.find(h => h.name === 'From');
+        const subjectHeader = headers.find(h => h.name === 'Subject');
+        const toHeader = headers.find(h => h.name === 'To');
+        
+        if (fromHeader && subjectHeader) {
+            await db.collection('emails').updateOne(
+                { user_id: user._id, message_id: m.id },
+                { 
+                    $set: { 
+                        from: fromHeader.value,
+                        subject: subjectHeader.value,
+                        to: toHeader?.value || '',
+                        content: snippet,
+                        full_data: full.data,
+                        processed_for_proactive: false,
+                        updated_at: new Date() 
+                    }, 
+                    $setOnInsert: { created_at: new Date() } 
+                },
+                { upsert: true }
+            );
+        }
     }
 }

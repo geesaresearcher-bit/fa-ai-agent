@@ -27,21 +27,60 @@ import {
     proactiveAgentTool,
     checkEmailFromUnknownTool,
     checkCalendarEventCreatedTool,
-    checkHubspotContactCreatedTool
+    checkHubspotContactCreatedTool,
+    lookupMeetingWithClientTool
 } from '../lib/tools.js';
 import { ensureConversation, saveMessage, loadRecentMessages, maybeSetTitle, updateRollingSummaryIfNeeded } from '../lib/memory.js';
+import { getUserTimezone } from '../lib/timezone.js';
 import { ObjectId } from 'mongodb';
 const router = express.Router();
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 // Parse "today 2.30pm", "tomorrow at 10", etc. -> ISO start/end
-function parseWhenToRange(text, tz = 'Asia/Colombo', defaultDurMins = 45) {
-    const parsed = chrono.parse(text, new Date(), { forwardDate: true })[0];
+function parseWhenToRange(text, tz = null, defaultDurMins = 45) {
+    // Use current date as reference to ensure we get current year
+    const now = new Date();
+    const currentYear = DateTime.now().year;
+    
+    // Dynamic timezone detection
+    let timezone = tz;
+    if (!timezone) {
+        // Try to detect timezone from system
+        timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    }
+    
+    // Parse the text with chrono
+    const parsed = chrono.parse(text, now, { 
+        forwardDate: true,
+        timezone: timezone,
+        instant: now
+    })[0];
+    
     if (!parsed) return null;
+    
     const startJS = parsed.date();
-    const start = DateTime.fromJSDate(startJS).setZone(tz);
-    const end = start.plus({ minutes: defaultDurMins });
-    return { startISO: start.toISO(), endISO: end.toISO() };
+    const start = DateTime.fromJSDate(startJS).setZone(timezone);
+    
+    // If the parsed year is in the past, adjust to current year or next occurrence
+    let adjustedStart = start;
+    if (start.year < currentYear) {
+        // Try to move to current year first
+        adjustedStart = start.set({ year: currentYear });
+        
+        // If that's still in the past, move to next occurrence
+        if (adjustedStart < DateTime.now().setZone(timezone)) {
+            adjustedStart = start.plus({ years: 1 });
+        }
+    }
+    
+    // Final validation: ensure the date is in the future
+    if (adjustedStart < DateTime.now().setZone(timezone)) {
+        // If still in the past, try to move to next week
+        adjustedStart = adjustedStart.plus({ weeks: 1 });
+    }
+    
+    const end = adjustedStart.plus({ minutes: defaultDurMins });
+    return { startISO: adjustedStart.toISO(), endISO: end.toISO() };
 }
 
 // Tool schemas for function calling
@@ -93,6 +132,21 @@ const tools = [
                     timeframe: { type: 'string', description: 'Range like "today", "next 7 days", "this month"' }
                 },
                 required: ['timeframe']
+            }
+        }
+    },
+    {
+        type: 'function',
+        function: {
+            name: 'lookup_meeting_with_client',
+            description: 'Look up upcoming meetings with a specific client',
+            parameters: {
+                type: 'object',
+                properties: {
+                    clientName: { type: 'string', description: 'Name of the client to look up meetings with' },
+                    clientEmail: { type: 'string', description: 'Email of the client to look up meetings with' }
+                },
+                required: ['clientName']
             }
         }
     },
@@ -414,10 +468,9 @@ If the user mentions a time like "today 2.30pm", assume timezone Asia/Colombo.`;
 
         // Build the chat messages: system + memory + recent + new user + context block
         const messages = [
-            { role: 'system', content: system },
+            { role: 'system', content: system + (context ? `\n\nRELEVANT CONTEXT FROM EMAILS AND HUBSPOT:\n${context}` : '') },
             rolled ? { role: 'system', content: `MEMORY:\n${rolled}` } : null,
             ...recent.map(m => ({ role: m.role, content: m.content })),
-            { role: 'assistant', content: `CONTEXT:\n${context}` },
             { role: 'user', content: message }
         ].filter(Boolean);
 
@@ -443,20 +496,43 @@ If the user mentions a time like "today 2.30pm", assume timezone Asia/Colombo.`;
 
                 // Parse times if missing
                 if (!start || !end) {
-                    const when = parseWhenToRange(message);
+                    // Get user's timezone preference
+                    const userTimezone = getUserTimezone(user);
+                    const when = parseWhenToRange(message, userTimezone);
                     if (!when) return res.json({ reply: 'Please provide a clear time (e.g., tomorrow 2:00pm).' });
                     start = when.startISO;
                     end = when.endISO;
+                    
+                    // Debug log for date parsing
+                    console.log(`[Date Parsing] Input: "${message}" -> Parsed: ${start} to ${end}`);
+                    
+                    // Validate that the parsed date is reasonable (not in the past)
+                    const parsedDate = new Date(start);
+                    const now = new Date();
+                    if (parsedDate < now) {
+                        return res.json({ 
+                            reply: `The parsed time "${message}" appears to be in the past. Please provide a future time (e.g., "next Tuesday at 3pm" or "tomorrow at 2pm").` 
+                        });
+                    }
                 }
 
                 // Extract attendee if not given
                 if (!attendees || attendees.length === 0) {
                     const emailMatch = message.match(/[\w.+-]+@[\w-]+\.[\w.-]+/i);
-                    if (emailMatch) attendees = [emailMatch[0]];
+                    if (emailMatch) {
+                        const foundEmail = emailMatch[0];
+                        // Try to find the contact in Hubspot to get the correct email
+                        const hubspotCheck = await findHubspotContactTool(userId, { query: foundEmail });
+                        if (hubspotCheck.ok && hubspotCheck.results?.length > 0) {
+                            attendees = [hubspotCheck.results[0].properties.email];
+                        } else {
+                            attendees = [foundEmail];
+                        }
+                    }
                 }
                 title = title || 'Meeting';
                 description = description || message; // include original user text for context
-                const tz = timeZone || 'Asia/Colombo';
+                const tz = timeZone || userTimezone;
 
                 // 1) Check for conflicts before scheduling
                 const fb = await getFreeBusyTool(userId, { startISO: start, endISO: end, timeZone: tz });
@@ -511,6 +587,35 @@ Reply with one of these options and I’ll schedule it.`;
                     name: name,
                     content: JSON.stringify(result)
                 });
+
+                // 5) Send email notifications to attendees
+                if (result.ok && attendees && attendees.length > 0) {
+                    for (const attendeeEmail of attendees) {
+                        const notificationEmail = await sendEmailTool(userId, {
+                            to: attendeeEmail,
+                            subject: `Meeting Scheduled: ${title}`,
+                            body: `Hi,
+
+You have a meeting scheduled:
+
+Title: ${title}
+Date: ${new Date(start).toLocaleString()}
+Duration: ${Math.round((new Date(end) - new Date(start)) / 60000)} minutes
+Description: ${description || 'No additional details'}
+
+Calendar Link: ${result.htmlLink || 'Check your calendar'}
+
+Best regards,
+Your Financial Advisor`
+                        });
+
+                        toolResults.push({
+                            tool_call_id: call.id + '_notification_' + attendeeEmail,
+                            name: 'send_email',
+                            content: JSON.stringify(notificationEmail)
+                        });
+                    }
+                }
             }
 
             else if (name === 'suggest_times') {
@@ -533,6 +638,15 @@ Reply with one of these options and I’ll schedule it.`;
 
             else if (name === 'get_upcoming_events') {
                 const result = await getUpcomingEventsTool(userId, args);
+                toolResults.push({
+                    tool_call_id: call.id,
+                    name: name,
+                    content: JSON.stringify(result)
+                });
+            }
+
+            else if (name === 'lookup_meeting_with_client') {
+                const result = await lookupMeetingWithClientTool(userId, args);
                 toolResults.push({
                     tool_call_id: call.id,
                     name: name,
