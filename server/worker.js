@@ -7,7 +7,37 @@ import {
     checkHubspotContactCreatedTool,
     proactiveAgentTool 
 } from './lib/tools.js';
-import { refreshHubSpotIfNeeded } from './lib/oauthRefresh.js';
+import { refreshHubSpotIfNeeded, refreshGoogleIfNeeded } from './lib/oauthRefresh.js';
+
+// Check and refresh Google token if needed
+async function ensureGoogleConnected(user) {
+    if (!user.google_tokens || !user.google_tokens.access_token) {
+        console.log(`[worker] Google not connected for user ${user._id}`);
+        return false;
+    }
+
+    try {
+        // This function automatically checks if token is expired and refreshes if needed
+        const refreshedTokens = await refreshGoogleIfNeeded(user);
+        console.log(`[worker] Google token is valid for user ${user._id}`);
+        return true;
+    } catch (error) {
+        console.log(`[worker] Google token refresh failed for user ${user._id}: ${error.message}`);
+        
+        // If refresh failed due to missing refresh_token, mark as disconnected
+        if (error.message.includes('Missing Google refresh_token')) {
+            console.log(`[worker] Google refresh_token missing for user ${user._id} - user needs to reconnect Google`);
+            // Clear the invalid tokens
+            const db = getDb();
+            await db.collection('users').updateOne(
+                { _id: user._id },
+                { $unset: { google_tokens: 1 } }
+            );
+        }
+        
+        return false;
+    }
+}
 
 // Check and refresh Hubspot token if needed
 async function ensureHubspotConnected(user) {
@@ -23,6 +53,18 @@ async function ensureHubspotConnected(user) {
         return true;
     } catch (error) {
         console.log(`[worker] Hubspot token refresh failed for user ${user._id}: ${error.message}`);
+        
+        // If refresh failed due to missing refresh_token, mark as disconnected
+        if (error.message.includes('Missing HubSpot refresh_token')) {
+            console.log(`[worker] Hubspot refresh_token missing for user ${user._id} - user needs to reconnect Hubspot`);
+            // Clear the invalid tokens
+            const db = getDb();
+            await db.collection('users').updateOne(
+                { _id: user._id },
+                { $unset: { hubspot_tokens: 1 } }
+            );
+        }
+        
         return false;
     }
 }
@@ -35,26 +77,42 @@ async function loop() {
         console.log(`Processing ${users.length} users...`);
         
         for (const u of users) {
-            try { 
-                await ingestEmailsForUser(u); 
-                console.log(`[ingestEmails] Success for user ${u.email}`);
-            } catch (e) { 
-                console.error('[ingestEmails]', e.message); 
+            // Check and refresh Google tokens before ingesting emails
+            const googleConnected = await ensureGoogleConnected(u);
+            if (googleConnected) {
+                try { 
+                    await ingestEmailsForUser(u); 
+                    console.log(`[ingestEmails] Success for user ${u.email}`);
+                } catch (e) { 
+                    console.error('[ingestEmails]', e.message); 
+                }
+            } else {
+                console.log(`[worker] Skipping email ingestion for user ${u._id} - Google not connected`);
             }
             
-            try { 
-                await ingestHubspotForUser(u); 
-                console.log(`[ingestHubspot] Success for user ${u.email}`);
-            } catch (e) { 
-                console.error('[ingestHubspot]', e.message); 
+            // Check and refresh Hubspot tokens before ingesting contacts
+            const hubspotConnected = await ensureHubspotConnected(u);
+            if (hubspotConnected) {
+                try { 
+                    await ingestHubspotForUser(u); 
+                    console.log(`[ingestHubspot] Success for user ${u.email}`);
+                } catch (e) { 
+                    console.error('[ingestHubspot]', e.message); 
+                }
+            } else {
+                console.log(`[worker] Skipping Hubspot ingestion for user ${u._id} - Hubspot not connected`);
             }
 
-            // Proactive agent processing
-            try {
-                await processProactiveEvents(u);
-                console.log(`[proactiveAgent] Success for user ${u.email}`);
-            } catch (e) {
-                console.error('[proactiveAgent]', e.message);
+            // Proactive agent processing (requires both Google and Hubspot)
+            if (googleConnected && hubspotConnected) {
+                try {
+                    await processProactiveEvents(u);
+                    console.log(`[proactiveAgent] Success for user ${u.email}`);
+                } catch (e) {
+                    console.error('[proactiveAgent]', e.message);
+                }
+            } else {
+                console.log(`[worker] Skipping proactive processing for user ${u._id} - Missing Google or Hubspot connection`);
             }
         }
 
